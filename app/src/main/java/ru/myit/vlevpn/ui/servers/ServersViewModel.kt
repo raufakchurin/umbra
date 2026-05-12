@@ -218,7 +218,6 @@ class ServersViewModel @Inject constructor(
         val generation = nextPingGeneration()
         val serverIds = servers.map { it.id }.toSet()
         val reconnectAfterPing = runtimeConnectionManager.isRunning
-        val selectedBeforePing = repository.selectedServerId.first()
         var vpnStoppedForPing = false
         if (reconnectAfterPing) {
             _events.emit(ServersUiEvent("VPN временно остановлен для проверки пинга"))
@@ -268,7 +267,7 @@ class ServersViewModel @Inject constructor(
             checkingGroups.update { it - groupId }
             clearPingResultsLater(serverIds, generation)
             if (vpnStoppedForPing) {
-                reconnectAfterManualPing(selectedBeforePing)
+                reconnectAfterManualPing()
             }
         }
     }
@@ -375,20 +374,9 @@ class ServersViewModel @Inject constructor(
         }
     }
 
-    private suspend fun reconnectAfterManualPing(selectedBeforePing: ServerId?) {
-        if (selectedBeforePing == null) {
-            _events.emit(ServersUiEvent("VPN не включен снова: нет выбранной локации"))
-            return
-        }
-
-        val selectedStillExists = repository.getServer(selectedBeforePing) != null
+    private suspend fun reconnectAfterManualPing() {
         runCatching {
-            if (selectedStillExists) {
-                repository.select(selectedBeforePing)
-                runtimeConnectionManager.connectSelectedProfile()
-            } else {
-                runtimeConnectionManager.connect()
-            }
+            runtimeConnectionManager.reconnectLastProfile()
         }.onSuccess {
             _events.emit(ServersUiEvent("VPN запускается снова"))
         }.onFailure { error ->

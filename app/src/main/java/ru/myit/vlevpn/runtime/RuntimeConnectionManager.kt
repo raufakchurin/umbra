@@ -54,6 +54,7 @@ class RuntimeConnectionManager @Inject constructor(
     private val pingGeneration = AtomicLong()
     private val connectionGeneration = AtomicLong()
     private val connectMutex = Mutex()
+    private var lastConnectedServerId: ServerId? = null
 
     val isRunning: Boolean
         get() = runtime.state.value is RuntimeState.Running
@@ -103,6 +104,37 @@ class RuntimeConnectionManager @Inject constructor(
                 return
             }
             connectSelected(settingsRepository.settings.first(), generation)
+        } finally {
+            connectMutex.unlock()
+        }
+    }
+
+    suspend fun reconnectLastProfile() {
+        if (!connectMutex.tryLock()) {
+            logs.add(LogLevel.WARN, "Reconnect ignored because another connect operation is active")
+            _events.emit(RuntimeConnectionEvent("Подключение уже выполняется"))
+            return
+        }
+        val generation = connectionGeneration.incrementAndGet()
+        try {
+            if (!state.value.canStartConnection()) {
+                logs.add(LogLevel.WARN, "Reconnect ignored in state ${state.value.logName()}")
+                return
+            }
+            val settings = settingsRepository.settings.first()
+            val lastConnectedServer = lastConnectedServerId?.let { serverRepository.getServer(it) }
+            if (lastConnectedServer != null) {
+                serverRepository.select(lastConnectedServer.id)
+                if (cancelIfConnectionStale(generation)) return
+                _events.emit(RuntimeConnectionEvent("Подключаемся к ${lastConnectedServer.quotedName()}"))
+                connectServer(lastConnectedServer, settings, generation)
+                return
+            }
+            if (settings.autoConnectMode != AutoConnectMode.DISABLED) {
+                autoConnect(settings, generation)
+            } else {
+                connectSelected(settings, generation)
+            }
         } finally {
             connectMutex.unlock()
         }
@@ -371,6 +403,9 @@ class RuntimeConnectionManager @Inject constructor(
                 vpnProfile = vpnProfile,
             ),
         )
+        if (isCurrentConnection(generation)) {
+            lastConnectedServerId = server.id
+        }
     }
 
     suspend fun disconnect() {

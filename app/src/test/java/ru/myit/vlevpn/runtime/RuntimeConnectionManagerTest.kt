@@ -376,6 +376,53 @@ class RuntimeConnectionManagerTest {
         assertEquals(RuntimeState.Idle, runtime.state.value)
     }
 
+    @Test
+    fun reconnectLastProfileRestoresLastSuccessfulXrayServer() = runBlocking {
+        val initiallySelected = server("server-1")
+        val laterSelected = server("server-2")
+        val serverRepository = FakeServerRepository(listOf(initiallySelected, laterSelected), initiallySelected.id)
+        val runtime = FakeProxyRuntime()
+        val manager = manager(
+            serverRepository = serverRepository,
+            settingsRepository = FakeSettingsRepository(AppSettings.Default),
+            pingRepository = FakePingRepository(delays = mapOf(initiallySelected.id to 12L)),
+            runtime = runtime,
+        )
+
+        manager.connectSelectedProfile()
+        manager.disconnect()
+        serverRepository.select(laterSelected.id)
+
+        manager.reconnectLastProfile()
+
+        assertEquals(listOf(initiallySelected.id, initiallySelected.id), runtime.startedRequests.map { it.server.id })
+        assertEquals(initiallySelected.id, serverRepository.selectedServerId.value)
+    }
+
+    @Test
+    fun reconnectLastProfileRestoresLastSuccessfulOlcRtcServer() = runBlocking {
+        val olcRtc = server("olcrtc-server", ProxyProtocol.OLCRTC)
+        val vless = server("vless-server")
+        val serverRepository = FakeServerRepository(listOf(olcRtc, vless), olcRtc.id)
+        val runtime = FakeProxyRuntime()
+        val manager = manager(
+            serverRepository = serverRepository,
+            settingsRepository = FakeSettingsRepository(AppSettings.Default),
+            pingRepository = FakePingRepository(delays = emptyMap()),
+            runtime = runtime,
+        )
+
+        manager.connectSelectedProfile()
+        manager.disconnect()
+        serverRepository.select(vless.id)
+
+        manager.reconnectLastProfile()
+
+        assertEquals(listOf(olcRtc.id, olcRtc.id), runtime.startedRequests.map { it.server.id })
+        assertEquals(ProxyProtocol.OLCRTC, runtime.startedRequests.last().server.protocol)
+        assertEquals(olcRtc.id, serverRepository.selectedServerId.value)
+    }
+
     private fun manager(
         serverRepository: ServerRepository,
         settingsRepository: SettingsRepository,
