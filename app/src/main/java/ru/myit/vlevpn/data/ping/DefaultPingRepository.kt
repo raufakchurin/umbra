@@ -40,13 +40,11 @@ import ru.myit.vlevpn.domain.repository.PingRepository
 import ru.myit.vlevpn.runtime.DelayResult
 import ru.myit.vlevpn.runtime.XrayConfigFactory
 import ru.myit.vlevpn.runtime.contract.OlcRtcPingRequest
-import ru.myit.vlevpn.runtime.contract.OlcRtcRuntimeEngine
 
 @Singleton
 class DefaultPingRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val configFactory: XrayConfigFactory,
-    private val olcRtcRuntimeEngines: Set<@JvmSuppressWildcards OlcRtcRuntimeEngine>,
 ) : PingRepository {
     private val proxyPingMutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true }
@@ -161,14 +159,7 @@ class DefaultPingRepository @Inject constructor(
     }
 
     private suspend fun olcRtcPing(server: ServerProfile): DelayResult = withContext(Dispatchers.IO) {
-        runCatching {
-            val engine = olcRtcRuntimeEngines.firstOrNull()
-                ?: error("olcRTC runtime module is not included in this build")
-            engine.measureDelay(server.toOlcRtcPingRequest())
-        }.fold(
-            onSuccess = { delay -> DelayResult(server.id, delay) },
-            onFailure = { error -> DelayResult(server.id, null, error.safeMessage()) },
-        )
+        DelayResult(server.id, null, OLCRTC_PING_UNAVAILABLE_MESSAGE)
     }
 
     private suspend fun tcpPing(server: ServerProfile): DelayResult = withContext(Dispatchers.IO) {
@@ -270,6 +261,8 @@ class DefaultPingRepository @Inject constructor(
     }
 
     private companion object {
+        const val OLCRTC_PING_UNAVAILABLE_MESSAGE =
+            "olcRTC ping is temporarily unavailable on Android"
         val PROXY_PING_URLS = listOf(
             "https://cp.cloudflare.com/generate_204",
             "https://www.gstatic.com/generate_204",
