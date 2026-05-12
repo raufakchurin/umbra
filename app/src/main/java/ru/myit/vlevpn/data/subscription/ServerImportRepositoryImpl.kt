@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import ru.myit.vlevpn.core.logging.LogLevel
 import ru.myit.vlevpn.core.logging.LogRepository
+import ru.myit.vlevpn.data.branding.PartnerBrandingManager
 import ru.myit.vlevpn.data.push.InAppNotificationManager
 import ru.myit.vlevpn.data.push.PushRegistrationManager
 import ru.myit.vlevpn.data.telemetry.MobileTelemetryManager
@@ -27,11 +28,12 @@ class ServerImportRepositoryImpl @Inject constructor(
     private val mobileTelemetryManager: MobileTelemetryManager,
     private val pushRegistrationManager: PushRegistrationManager,
     private val inAppNotificationManager: InAppNotificationManager,
+    private val partnerBrandingManager: PartnerBrandingManager,
 ) : ServerImportRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun importFromInput(input: String): ImportSummary {
-        val trimmed = input.trim()
+        val trimmed = input.normalizedImportInput()
         if (trimmed.isBlank()) {
             return ImportSummary(0, 0, "Clipboard is empty")
         }
@@ -49,15 +51,6 @@ class ServerImportRepositoryImpl @Inject constructor(
             metadata = fetched.metadata,
         )
         if (parsed.profiles.isNotEmpty()) {
-            if (parsed.providerId.isNotBlank()) {
-                settingsRepository.updateSubscriptionProvider(
-                    providerId = parsed.providerId,
-                    domainHash = parsed.providerDomainHash,
-                )
-                logs.add(LogLevel.INFO, "Subscription provider metadata saved")
-                pushRegistrationManager.registerCurrentToken()
-                inAppNotificationManager.registerAndPollAsync()
-            }
             val hadServers = serverRepository.hasServers()
             val subscriptionId = parsed.profiles.firstOrNull()?.subscriptionId.orEmpty()
             if (subscriptionId.isNotBlank()) {
@@ -68,6 +61,7 @@ class ServerImportRepositoryImpl @Inject constructor(
             if (!hadServers) {
                 serverRepository.select(parsed.profiles.first().id)
             }
+            saveProviderMetadataBestEffort(parsed)
             runCatching {
                 mobileTelemetryManager.trackSubscriptionAdded(
                     importedCount = parsed.importedCount,
@@ -101,6 +95,22 @@ class ServerImportRepositoryImpl @Inject constructor(
     private fun String.subscriptionSourceType(): String =
         if (isSubscriptionUrl()) "url" else "manual_text"
 
+    private suspend fun saveProviderMetadataBestEffort(parsed: ParsedSubscription) {
+        if (parsed.providerId.isBlank()) return
+        runCatching {
+            settingsRepository.updateSubscriptionProvider(
+                providerId = parsed.providerId,
+                domainHash = parsed.providerDomainHash,
+            )
+            logs.add(LogLevel.INFO, "Subscription provider metadata saved")
+            pushRegistrationManager.registerCurrentToken()
+            inAppNotificationManager.registerAndPollAsync()
+            partnerBrandingManager.refreshAsync(scope)
+        }.onFailure { error ->
+            logs.add(LogLevel.WARN, "Subscription provider metadata failed: ${error.message.orEmpty()}")
+        }
+    }
+
     private fun scheduleExtraKeysImport(
         sourceHint: String,
         metadata: SubscriptionMetadata,
@@ -112,7 +122,11 @@ class ServerImportRepositoryImpl @Inject constructor(
         if (importedAtMillis <= 0L) return
         val startPosition = mainProfiles.maxOfOrNull { it.subscriptionPosition }?.plus(1)
             ?: mainProfiles.size
-        val extraKeysUrl = ExtraKeysAddUrl.resolve(metadata.extraKeysAddUrl, sourceHint)
+        val extraKeysUrl = runCatching {
+            ExtraKeysAddUrl.resolve(metadata.extraKeysAddUrl, sourceHint)
+        }.onFailure { error ->
+            logs.add(LogLevel.WARN, "Extra subscription keys URL ignored: ${error.message.orEmpty()}")
+        }.getOrDefault("")
         if (extraKeysUrl.isBlank()) return
 
         scope.launch {
@@ -187,3 +201,34 @@ class ServerImportRepositoryImpl @Inject constructor(
         }.getOrDefault(emptyList())
     }
 }
+
+internal fun String.normalizedImportInput(): String {
+    val trimmed = trim()
+    if (trimmed.isBlank()) return ""
+    if (trimmed.startsWithKnownImportPayload()) return trimmed
+    return IMPORT_PAYLOAD_REGEX
+        .find(trimmed)
+        ?.value
+        ?.trimImportTokenSuffix()
+        ?: trimmed
+}
+
+private fun String.startsWithKnownImportPayload(): Boolean =
+    startsWith("https://", ignoreCase = true) ||
+        startsWith("http://", ignoreCase = true) ||
+        startsWith("vless://", ignoreCase = true) ||
+        startsWith("vmess://", ignoreCase = true) ||
+        startsWith("trojan://", ignoreCase = true) ||
+        startsWith("ss://", ignoreCase = true) ||
+        startsWith("olcrtc://", ignoreCase = true) ||
+        startsWith("{") ||
+        startsWith("[")
+
+private fun String.trimImportTokenSuffix(): String =
+    trimEnd { char ->
+        char.isWhitespace() || char in setOf(',', '.', ';', ':', ')', ']', '}', '>', '"', '\'')
+    }
+
+private val IMPORT_PAYLOAD_REGEX = Regex(
+    pattern = """(?i)\b(?:https?://|vless://|vmess://|trojan://|ss://|olcrtc://)[^\s<>"']+""",
+)

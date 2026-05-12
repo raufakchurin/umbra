@@ -15,6 +15,8 @@ Current status: native Android runtime path is wired behind the optional module:
 - upstream olcRTC gomobile AAR is packaged as `libs/olcrtc.aar`;
 - the AAR is rebuilt with a private Java package prefix and `libolcrtcjni.so`
   to avoid class/native-name conflicts with Xray's gomobile runtime;
+- `libolcrtcjni.so` is built with 16 KB ELF segment alignment for Android
+  15+ / Google Play compatibility;
 - `hev-socks5-tunnel` is built through NDK and receives TUN traffic from
   Android `VpnService`;
 - only `arm64-v8a` is packaged.

@@ -15,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
+import ru.myit.vlevpn.data.branding.PartnerBrandingManager
 import ru.myit.vlevpn.core.logging.LogLevel
 import ru.myit.vlevpn.core.logging.LogRepository
 import ru.myit.vlevpn.data.provider.ProviderTelemetryManager
@@ -35,6 +36,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var subscriptionAutoUpdateManager: SubscriptionAutoUpdateManager
     @Inject lateinit var providerTelemetryManager: ProviderTelemetryManager
     @Inject lateinit var mobileTelemetryManager: MobileTelemetryManager
+    @Inject lateinit var partnerBrandingManager: PartnerBrandingManager
     @Inject lateinit var pushRegistrationManager: PushRegistrationManager
     @Inject lateinit var inAppNotificationManager: InAppNotificationManager
     @Inject lateinit var logs: LogRepository
@@ -69,6 +71,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
         lifecycleScope.launch {
             subscriptionAutoUpdateManager.refreshOnColdAppLaunch()
+            runCatching { partnerBrandingManager.refreshNow() }
             runCatching { providerTelemetryManager.sendDueProviderCheck() }
             runCatching { mobileTelemetryManager.sendDueReport() }
         }

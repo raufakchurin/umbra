@@ -59,6 +59,9 @@ class DataStoreSettingsRepository @Inject constructor(
     override suspend fun updateAppearance(accentColor: AppAccentColor, backgroundStyle: AppBackgroundStyle) =
         dataStore.updateAppearance(accentColor, backgroundStyle)
 
+    override suspend fun updateLocalBrandingOverride(enabled: Boolean) =
+        dataStore.updateLocalBrandingOverride(enabled)
+
     override suspend fun markProviderTelemetrySent(sentAtMillis: Long) {
         dataStore.markProviderTelemetrySent(sentAtMillis)
     }

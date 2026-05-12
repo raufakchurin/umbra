@@ -158,37 +158,12 @@ class ServersViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ServersUiState())
 
     fun select(id: ServerId) {
+        selectAndConnect(id)
+    }
+
+    fun selectAndConnect(id: ServerId) {
         viewModelScope.launch {
-            val currentSelectedId = repository.selectedServerId.first()
-            if (currentSelectedId == id) return@launch
-
-            val target = repository.getServer(id)
-            if (target == null) {
-                _events.emit(ServersUiEvent("Локация не найдена"))
-                return@launch
-            }
-
-            val reconnect = runtimeConnectionManager.isRunning
-            repository.select(id)
-            if (!reconnect) {
-                _events.emit(ServersUiEvent("Выбрана локация «${target.name}»"))
-                return@launch
-            }
-
-            _events.emit(ServersUiEvent("Переподключаемся к «${target.name}»"))
-            runtimeConnectionManager.disconnect()
-            if (!waitForRuntimeStop()) {
-                _events.emit(ServersUiEvent("Не удалось остановить VPN для переподключения"))
-                return@launch
-            }
-
-            runCatching {
-                runtimeConnectionManager.connect()
-            }.onFailure { error ->
-                _events.emit(
-                    ServersUiEvent("Не удалось переподключиться: ${error.message ?: "неизвестная ошибка"}"),
-                )
-            }
+            runtimeConnectionManager.selectAndConnect(id)
         }
     }
 
@@ -386,10 +361,10 @@ class ServersViewModel @Inject constructor(
             }.onSuccess { summary ->
                 _events.emit(
                     ServersUiEvent(
-                        if (summary.importedCount > 0) {
-                            "Подписка добавлена"
-                        } else {
-                            "Нечего импортировать"
+                        when {
+                            summary.importedCount > 0 -> "Подписка добавлена"
+                            summary.skippedCount > 0 -> "Не удалось распознать данные из буфера"
+                            else -> "Буфер обмена пуст"
                         },
                     ),
                 )

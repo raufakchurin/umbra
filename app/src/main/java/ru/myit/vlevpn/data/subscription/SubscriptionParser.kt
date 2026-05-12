@@ -1,7 +1,9 @@
 package ru.myit.vlevpn.data.subscription
 
+import java.io.ByteArrayOutputStream
 import java.net.URI
-import java.net.URLDecoder
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -134,13 +136,13 @@ class SubscriptionParser @Inject constructor() {
     }
 
     private fun parseVless(input: String): ServerProfile {
-        val uri = URI(input)
+        val uri = parseProxyUri(input, "vless")
         val query = parseQuery(uri.rawQuery)
         return baseProfile(
             raw = input,
-            name = decode(uri.rawFragment).ifBlank { uri.host ?: "VLESS" },
+            name = decode(uri.rawFragment).ifBlank { uri.host.ifBlank { "VLESS" } },
             protocol = ProxyProtocol.VLESS,
-            host = uri.host.orEmpty(),
+            host = uri.host,
             port = uri.port,
         ).copy(
             credential = decode(uri.rawUserInfo),
@@ -159,13 +161,13 @@ class SubscriptionParser @Inject constructor() {
     }
 
     private fun parseTrojan(input: String): ServerProfile {
-        val uri = URI(input)
+        val uri = parseProxyUri(input, "trojan")
         val query = parseQuery(uri.rawQuery)
         return baseProfile(
             raw = input,
-            name = decode(uri.rawFragment).ifBlank { uri.host ?: "Trojan" },
+            name = decode(uri.rawFragment).ifBlank { uri.host.ifBlank { "Trojan" } },
             protocol = ProxyProtocol.TROJAN,
-            host = uri.host.orEmpty(),
+            host = uri.host,
             port = uri.port,
         ).copy(
             password = decode(uri.rawUserInfo),
@@ -402,9 +404,88 @@ class SubscriptionParser @Inject constructor() {
     private fun JsonObject.string(key: String): String =
         this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
 
+    private fun parseProxyUri(input: String, scheme: String): ParsedProxyUri {
+        val prefix = "$scheme://"
+        require(input.startsWith(prefix, ignoreCase = true)) { "Invalid $scheme URI" }
+        val payload = input.substring(prefix.length)
+        val beforeFragment = payload.substringBefore("#")
+        val rawFragment = payload.substringAfter("#", "")
+        val authorityAndQuery = beforeFragment
+        val authority = authorityAndQuery.substringBefore("?")
+        val rawQuery = authorityAndQuery.substringAfter("?", "").takeIf { "?" in authorityAndQuery }
+        val rawUserInfo = authority.substringBeforeLast("@", "").takeIf { "@" in authority }
+        val hostPort = if ("@" in authority) authority.substringAfterLast("@") else authority
+        val hostAndPort = parseHostPort(hostPort)
+        require(hostAndPort.host.isNotBlank()) { "$scheme host is required" }
+        return ParsedProxyUri(
+            rawUserInfo = rawUserInfo,
+            host = hostAndPort.host,
+            port = hostAndPort.port,
+            rawQuery = rawQuery,
+            rawFragment = rawFragment,
+        )
+    }
+
+    private fun parseHostPort(value: String): HostAndPort {
+        val trimmed = value.trim()
+        if (trimmed.startsWith("[")) {
+            val end = trimmed.indexOf(']')
+            val host = if (end > 0) trimmed.substring(1, end) else trimmed.removePrefix("[")
+            val port = if (end > 0) {
+                trimmed.substring(end + 1).removePrefix(":").toIntOrNull() ?: -1
+            } else {
+                -1
+            }
+            return HostAndPort(host = host, port = port)
+        }
+
+        val port = trimmed.substringAfterLast(":", "").toIntOrNull()
+        val host = if (port != null && ":" in trimmed) {
+            trimmed.substringBeforeLast(":")
+        } else {
+            trimmed
+        }
+        return HostAndPort(host = host, port = port ?: -1)
+    }
+
     private fun decode(value: String?): String {
         if (value.isNullOrBlank()) return ""
-        return URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+        return runCatching {
+            strictPercentDecode(value)
+        }.getOrDefault(value)
+    }
+
+    private fun strictPercentDecode(value: String): String {
+        if ('%' !in value && '+' !in value) return value
+
+        val out = ByteArrayOutputStream(value.length)
+        var index = 0
+        while (index < value.length) {
+            val char = value[index]
+            when {
+                char == '%' -> {
+                    require(index + 2 < value.length) { "Incomplete percent escape" }
+                    val byte = value.substring(index + 1, index + 3).toIntOrNull(16)
+                        ?: error("Invalid percent escape")
+                    out.write(byte)
+                    index += 3
+                }
+                char == '+' -> {
+                    out.write(' '.code)
+                    index += 1
+                }
+                else -> {
+                    val bytes = char.toString().toByteArray(StandardCharsets.UTF_8)
+                    out.write(bytes, 0, bytes.size)
+                    index += 1
+                }
+            }
+        }
+
+        val decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return decoder.decode(ByteBuffer.wrap(out.toByteArray())).toString()
     }
 
     private fun decodeBase64Text(value: String): String? {
@@ -430,5 +511,18 @@ class SubscriptionParser @Inject constructor() {
         val sourceUrl: String,
         val importedAtMillis: Long,
         val metadata: SubscriptionMetadata,
+    )
+
+    private data class ParsedProxyUri(
+        val rawUserInfo: String?,
+        val host: String,
+        val port: Int,
+        val rawQuery: String?,
+        val rawFragment: String,
+    )
+
+    private data class HostAndPort(
+        val host: String,
+        val port: Int,
     )
 }

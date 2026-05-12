@@ -191,7 +191,7 @@ class AndroidProxyRuntime @Inject constructor(
     }
 
     private companion object {
-        const val RUNTIME_PROCESS_RESTART_GUARD_MS = 700L
+        const val RUNTIME_PROCESS_RESTART_GUARD_MS = 3_000L
         const val FOREGROUND_START_TIMEOUT_MS = 5_000L
     }
 }

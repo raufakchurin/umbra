@@ -6,6 +6,7 @@ import android.os.Process
 import java.net.Socket
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,6 +32,7 @@ import ru.myit.vlevpn.runtime.plugin.RuntimeProtocolRegistry
 import ru.myit.vlevpn.runtime.vpn.AndroidVpnController
 import ru.myit.vlevpn.runtime.vpn.VleVpnService
 
+@Singleton
 class VpnServiceRuntime @Inject constructor(
     @ApplicationContext private val context: Context,
     private val xrayRuntime: XrayRuntime,
@@ -85,15 +87,15 @@ class VpnServiceRuntime @Inject constructor(
                 log(LogLevel.ERROR, "Runtime session $sessionId start failed: ${error.message.orEmpty()}")
                 stopLocked(setIdle = false, reason = "start failure")
                 updateState(RuntimeState.Error(error.message ?: "Runtime start failed"))
-                service.finishRuntimeStop(killRuntimeProcess = true)
+                service.finishRuntimeStop(recycleRuntimeProcess = true)
             }
         }
     }
 
-    suspend fun stop(service: VleVpnService, killRuntimeProcess: Boolean = true) {
+    suspend fun stop(service: VleVpnService) {
         mutex.withLock {
             stopLocked(setIdle = true, reason = "stop request")
-            service.finishRuntimeStop(killRuntimeProcess)
+            service.finishRuntimeStop(recycleRuntimeProcess = true)
         }
     }
 

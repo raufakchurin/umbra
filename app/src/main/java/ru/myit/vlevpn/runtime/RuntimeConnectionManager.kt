@@ -108,6 +108,64 @@ class RuntimeConnectionManager @Inject constructor(
         }
     }
 
+    suspend fun selectAndConnect(serverId: ServerId) {
+        if (!connectMutex.tryLock()) {
+            logs.add(LogLevel.WARN, "Server switch ignored because another connect operation is active")
+            _events.emit(RuntimeConnectionEvent("Подключение уже выполняется"))
+            return
+        }
+        val generation = connectionGeneration.incrementAndGet()
+        try {
+            val target = serverRepository.getServer(serverId)
+            if (target == null) {
+                stateStore.update(RuntimeState.Error("Selected server profile was not found"))
+                logs.add(LogLevel.WARN, "Selected server profile was not found: ${serverId.value}")
+                _events.emit(RuntimeConnectionEvent("Локация не найдена"))
+                return
+            }
+
+            val currentSelectedId = serverRepository.selectedServerId.first()
+            val currentState = state.value
+            if (currentSelectedId == serverId && currentState is RuntimeState.Running) {
+                _events.emit(RuntimeConnectionEvent("Уже подключено к ${target.quotedName()}"))
+                return
+            }
+
+            if (currentSelectedId != serverId) {
+                serverRepository.select(serverId)
+            }
+
+            val settings = settingsRepository.settings.first()
+            val directSelectedProfile = settings.autoConnectMode == AutoConnectMode.DISABLED
+            val needsStop = currentState.isActiveOrStarting() || currentState is RuntimeState.Stopping
+            if (needsStop) {
+                logs.add(LogLevel.INFO, "Switching VPN runtime to '${target.name}'")
+                _events.emit(RuntimeConnectionEvent("Переподключаемся к ${target.quotedName()}"))
+                runtime.stop()
+                if (!awaitStopped(RUNTIME_STOP_TIMEOUT_MS)) {
+                    val message = "Could not stop VPN before switching server"
+                    stateStore.update(RuntimeState.Error(message))
+                    logs.add(LogLevel.ERROR, message)
+                    _events.emit(RuntimeConnectionEvent("Не удалось остановить VPN для переподключения"))
+                    return
+                }
+                if (cancelIfConnectionStale(generation)) return
+            } else if (directSelectedProfile) {
+                _events.emit(RuntimeConnectionEvent("Подключаемся к ${target.quotedName()}"))
+            } else {
+                _events.emit(RuntimeConnectionEvent("Проверяем ${target.quotedName()}"))
+            }
+
+            if (directSelectedProfile) {
+                connectServer(target, settings, generation)
+            } else {
+                autoConnect(settings, generation)
+            }
+        } finally {
+            connectMutex.unlock()
+        }
+    }
+
     private suspend fun connectSelected(settings: AppSettings, generation: Long) {
         val server = serverRepository.getSelectedServer()
         if (server == null) {

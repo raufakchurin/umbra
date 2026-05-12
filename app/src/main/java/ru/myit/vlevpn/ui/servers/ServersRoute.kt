@@ -5,6 +5,7 @@ import android.content.Context
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -54,10 +56,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -144,8 +150,21 @@ private fun ServersScreen(
 
 fun Context.readClipboardText(): String? {
     val manager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val item = manager.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
-    return item?.coerceToText(this)?.toString()
+    val clip = manager.primaryClip?.takeIf { it.itemCount > 0 } ?: return null
+    val values = buildList {
+        for (index in 0 until clip.itemCount) {
+            val item = clip.getItemAt(index)
+            item.text?.toString()?.takeIf { it.isNotBlank() }?.let(::add)
+            item.htmlText?.takeIf { it.isNotBlank() }?.let(::add)
+            item.uri?.toString()?.takeIf { it.isNotBlank() }?.let(::add)
+            item.intent?.dataString?.takeIf { it.isNotBlank() }?.let(::add)
+            item.coerceToText(this@readClipboardText)
+                ?.toString()
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::add)
+        }
+    }
+    return values.distinct().joinToString(separator = "\n").ifBlank { null }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -163,16 +182,45 @@ fun ServerProfilesContent(
     onImportClipboard: () -> Unit,
     modifier: Modifier = Modifier,
     title: String? = null,
+    titleBadge: String? = null,
     showAddActions: Boolean = true,
 ) {
     var pendingScrollGroupId by remember { mutableStateOf<String?>(null) }
     val language = LocalAppLanguage.current
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        (title ?: localized(language, "Серверы", "Servers")).takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        (title ?: localized(language, "Серверы", "Servers")).takeIf { it.isNotBlank() }?.let { resolvedTitle ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    resolvedTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                titleBadge?.takeIf { it.isNotBlank() }?.let { badge ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.76f))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(13.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = badge,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
         if (showAddActions) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -194,7 +242,12 @@ fun ServerProfilesContent(
             }
         }
         if (state.groups.isEmpty()) {
-            Card(Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(localized(language, "Локальных профилей нет", "No local profiles"))
                     if (showAddActions) {
@@ -206,7 +259,7 @@ fun ServerProfilesContent(
                 }
             }
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 state.groups.forEach { group ->
                     key(group.id) {
                         val bringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -257,12 +310,36 @@ private fun ServerGroupCard(
     language: AppLanguage,
     modifier: Modifier = Modifier,
 ) {
+    val shape = RoundedCornerShape(26.dp)
+    val railColor = MaterialTheme.colorScheme.primary
     Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 18.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Color(0xFF071312).copy(alpha = 0.06f),
+                spotColor = Color(0xFF071312).copy(alpha = 0.08f),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.82f), shape),
+        shape = shape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    if (group.isSubscription) {
+                        drawRect(
+                            color = railColor,
+                            size = Size(6.dp.toPx(), size.height),
+                        )
+                    }
+                }
+                .padding(start = if (group.isSubscription) 6.dp else 0.dp),
+        ) {
             if (group.isSubscription) {
                 SubscriptionHeader(
                     group = group,
@@ -283,10 +360,17 @@ private fun ServerGroupCard(
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
                 group.servers.forEachIndexed { index, server ->
-                    if (index > 0) HorizontalDivider()
+                    val selected = server.id == selectedServerId
+                    val previousSelected = index > 0 && group.servers[index - 1].id == selectedServerId
+                    if (index > 0 && !selected && !previousSelected) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 56.dp, end = 18.dp),
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                     ServerRow(
                         server = server,
-                        selected = server.id == selectedServerId,
+                        selected = selected,
                         ping = pingResults[server.id],
                         onSelect = { onSelect(server.id) },
                         onEdit = { onEdit(server.id.value) },
@@ -312,56 +396,51 @@ private fun SubscriptionHeader(
 ) {
     val uriHandler = LocalUriHandler.current
     val link = group.supportUrl.ifBlank { group.webPageUrl }
-    val headerColor = MaterialTheme.colorScheme.primary
-    val headerBandColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
-    val headerAccentColor = MaterialTheme.colorScheme.primaryContainer
-    val headerTrackColor = Color.Black.copy(alpha = 0.22f)
-    val onHeader = Color.White
-    val onHeaderMuted = Color.White.copy(alpha = 0.72f)
+    val subtitle = group.subtitle(language)
+    val headerAccentColor = MaterialTheme.colorScheme.primary
+    val headerTrackColor = MaterialTheme.colorScheme.surfaceVariant
 
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .background(headerColor),
+            .fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 14.dp, end = 8.dp, bottom = 10.dp),
+                .padding(start = 14.dp, top = 14.dp, end = 10.dp, bottom = 0.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
                     group.title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = onHeader,
-                )
-                Text(
-                    group.subtitle(language),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = onHeaderMuted,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             IconButton(
                 enabled = !group.refreshing,
                 onClick = onRefreshGroup,
+                modifier = Modifier.size(42.dp),
             ) {
                 Icon(
                     Icons.Default.Refresh,
                     contentDescription = localized(language, "Обновить подписку", "Refresh subscription"),
-                    tint = if (group.refreshing) onHeader.copy(alpha = 0.38f) else onHeader,
+                    tint = if (group.refreshing) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f) else MaterialTheme.colorScheme.primary,
                 )
             }
             IconButton(
                 enabled = !group.checking,
                 onClick = onPingGroup,
+                modifier = Modifier.size(42.dp),
             ) {
                 Icon(
                     Icons.Default.Speed,
                     contentDescription = localized(language, "Проверить пинг", "Check ping"),
-                    tint = if (group.checking) onHeader.copy(alpha = 0.38f) else onHeader,
+                    tint = if (group.checking) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f) else MaterialTheme.colorScheme.primary,
                 )
             }
             SubscriptionActionsMenu(
@@ -371,16 +450,23 @@ private fun SubscriptionHeader(
                 onRefresh = onRefreshGroup,
                 onToggleAutoUpdateOnLaunch = onToggleAutoUpdateOnLaunch,
                 onDelete = onDeleteGroup,
-                iconColor = onHeader,
+                iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        Text(
+            subtitle,
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
 
         if (group.totalBytes > 0L || group.expireAtMillis > 0L || link.isNotBlank()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(headerBandColor)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -390,7 +476,7 @@ private fun SubscriptionHeader(
                         progress = group.trafficProgress(),
                         trackColor = headerTrackColor,
                         progressColor = headerAccentColor,
-                        contentColor = onHeader,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -400,8 +486,8 @@ private fun SubscriptionHeader(
                             "${group.servers.size} конфигов",
                             "${group.servers.size} config(s)",
                         ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = onHeaderMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -412,9 +498,9 @@ private fun SubscriptionHeader(
                             "Истекает: ${formatDate(group.expireAtMillis)}",
                             "Expires: ${formatDate(group.expireAtMillis)}",
                         ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = onHeader,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
                     )
                 }
                 if (link.isNotBlank()) {
@@ -422,7 +508,7 @@ private fun SubscriptionHeader(
                         Icon(
                             Icons.AutoMirrored.Filled.Send,
                             contentDescription = localized(language, "Открыть ссылку поддержки", "Open support link"),
-                            tint = onHeader,
+                            tint = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
@@ -430,17 +516,23 @@ private fun SubscriptionHeader(
         }
 
         if (group.announce.isNotBlank()) {
-            HorizontalDivider(color = Color(0xFF9B4E57).copy(alpha = 0.7f))
-            Text(
-                group.announce,
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(headerBandColor)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = onHeader,
-            )
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    group.announce,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -454,12 +546,12 @@ private fun LocalGroupHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(14.dp),
+            .padding(18.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(group.title, fontWeight = FontWeight.SemiBold)
+            Text(group.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
             Text(
                 group.subtitle(language),
                 style = MaterialTheme.typography.bodySmall,
@@ -489,8 +581,8 @@ private fun TrafficProgressBar(
 ) {
     Box(
         modifier = modifier
-            .height(22.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .height(16.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(trackColor),
     ) {
         Box(
@@ -502,7 +594,7 @@ private fun TrafficProgressBar(
         Text(
             text = label,
             modifier = Modifier.align(Alignment.Center),
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = contentColor,
         )
@@ -579,17 +671,18 @@ private fun ServerRow(
     subscriptionStyle: Boolean,
     language: AppLanguage,
 ) {
-    val selectedBackground = MaterialTheme.colorScheme.primary
+    val selectedBackground = MaterialTheme.colorScheme.primaryContainer
     val rowBackground = if (selected) selectedBackground else Color.Transparent
-    val primaryTextColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
-    val secondaryTextColor = if (selected) Color.White.copy(alpha = 0.76f) else MaterialTheme.colorScheme.onSurfaceVariant
-    val actionColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+    val primaryTextColor = MaterialTheme.colorScheme.onSurface
+    val secondaryTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val actionColor = MaterialTheme.colorScheme.onSurfaceVariant
     val showDetailsAction = !(subscriptionStyle && server.isOlcRtc)
     val pingColor = when {
-        selected -> Color.White.copy(alpha = 0.84f)
         ping?.error == null -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.error
     }
+    val displayName = server.rowDisplayName()
+    val leadingFlag = server.leadingFlagEmoji()
 
     Row(
         modifier = Modifier
@@ -599,34 +692,64 @@ private fun ServerRow(
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .width(4.dp)
-                .height(68.dp)
-                .background(if (selected) Color.White else Color.Transparent),
+        if (!subscriptionStyle) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(54.dp)
+                    .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent),
+            )
+        }
+        ServerMarker(
+            text = server.markerText(displayName),
+            color = server.markerColor(displayName),
+            flag = leadingFlag,
+            modifier = Modifier.padding(start = 10.dp),
         )
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 8.dp),
+                .padding(start = 10.dp, top = 7.dp, bottom = 7.dp, end = 8.dp),
         ) {
             Text(
-                server.name,
+                displayName,
                 fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleSmall,
                 color = primaryTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 server.subtitle(subscriptionStyle),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = secondaryTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(
-            text = ping.label(language),
-            style = MaterialTheme.typography.bodySmall,
-            color = pingColor,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
+        ping.label(language).takeIf { it.isNotBlank() }?.let { pingLabel ->
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (selected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.74f)
+                        },
+                    )
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = pingLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = pingColor,
+                )
+            }
+        }
         if (showDetailsAction) {
             IconButton(onClick = onEdit) {
                 Icon(
@@ -648,11 +771,50 @@ private fun ServerRow(
     }
 }
 
+@Composable
+private fun ServerMarker(
+    text: String,
+    color: Color,
+    flag: String?,
+    modifier: Modifier = Modifier,
+) {
+    if (flag != null) {
+        Box(
+            modifier = modifier.size(34.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = flag,
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+            )
+        }
+        return
+    }
+
+    Box(
+        modifier = modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(color)
+            .border(1.dp, Color.White.copy(alpha = 0.78f), RoundedCornerShape(11.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 1,
+        )
+    }
+}
+
 private fun ServerPingUiState?.label(language: AppLanguage): String = when {
     this == null -> ""
     checking -> "..."
     delayMs != null -> localized(language, "${delayMs} мс", "${delayMs} ms")
-    error != null -> "n/a"
+    error != null -> localized(language, "н/д", "n/a")
     else -> ""
 }
 
@@ -670,6 +832,173 @@ private fun ServerProfile.subtitle(subscriptionStyle: Boolean): String =
     } else {
         "${protocol.displayName} | ${if (isCustomJson) "JSON" else host.ifBlank { "custom JSON" }}"
     }
+
+private val serverMarkerPalette = listOf(
+    Color(0xFF0E7A70),
+    Color(0xFF304E9B),
+    Color(0xFF8E4C9A),
+    Color(0xFFB54A3B),
+    Color(0xFF426A30),
+    Color(0xFF545D6D),
+)
+
+private fun ServerProfile.rowDisplayName(): String {
+    val trimmed = name.trim()
+    val withoutEmoji = trimmed.withoutDisplayEmoji()
+    val withoutLeadingSymbol = withoutEmoji.dropWhile { !it.isLetterOrDigit() }.trimStart()
+    return withoutLeadingSymbol.ifBlank {
+        trimmed.ifBlank {
+            host.ifBlank { protocol.displayName }
+        }
+    }
+}
+
+private fun ServerProfile.leadingFlagEmoji(): String? = name.trimStart().displayEmoji()
+
+private fun String.displayEmoji(): String? =
+    firstFlagEmojiToken() ?: firstEmojiToken()
+
+private fun String.withoutDisplayEmoji(): String {
+    val emoji = displayEmoji() ?: return trim()
+    return replace(emoji, "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+}
+
+private fun String.leadingCountryFlagEmoji(): String? {
+    if (isBlank()) return null
+    val first = codePointAt(0)
+    if (!first.isRegionalIndicatorSymbol()) return null
+    val firstSize = Character.charCount(first)
+    if (length <= firstSize) return null
+    val second = codePointAt(firstSize)
+    if (!second.isRegionalIndicatorSymbol()) return null
+    return String(Character.toChars(first)) + String(Character.toChars(second))
+}
+
+private fun Int.isRegionalIndicatorSymbol(): Boolean = this in 0x1F1E6..0x1F1FF
+
+private fun String.firstFlagEmojiToken(): String? {
+    leadingCountryFlagEmoji()?.let { return it }
+    var index = 0
+    while (index < length) {
+        val codePoint = codePointAt(index)
+        if (codePoint.isFlagEmojiCodePoint()) {
+            return emojiTokenAt(index)
+        }
+        index += Character.charCount(codePoint)
+    }
+    return null
+}
+
+private fun String.firstEmojiToken(): String? {
+    var index = 0
+    while (index < length) {
+        val codePoint = codePointAt(index)
+        if (codePoint.isRegionalIndicatorSymbol()) {
+            val nextIndex = index + Character.charCount(codePoint)
+            if (nextIndex < length) {
+                val next = codePointAt(nextIndex)
+                if (next.isRegionalIndicatorSymbol()) {
+                    return substring(index, nextIndex + Character.charCount(next))
+                }
+            }
+        }
+        if (codePoint.isEmojiCodePoint()) {
+            return emojiTokenAt(index)
+        }
+        index += Character.charCount(codePoint)
+    }
+    return null
+}
+
+private fun Int.isFlagEmojiCodePoint(): Boolean =
+    isRegionalIndicatorSymbol() ||
+        this == 0x1F3F3 ||
+        this == 0x1F3F4 ||
+        this == 0x1F38C ||
+        this == 0x1F6A9
+
+private fun String.emojiTokenAt(startIndex: Int): String {
+    var end = startIndex + Character.charCount(codePointAt(startIndex))
+    end = consumeEmojiSuffix(end)
+    while (end < length) {
+        val next = codePointAt(end)
+        if (next == 0x200D) {
+            val joinedIndex = end + Character.charCount(next)
+            if (joinedIndex < length) {
+                val joined = codePointAt(joinedIndex)
+                if (joined.isEmojiCodePoint()) {
+                    end = joinedIndex + Character.charCount(joined)
+                    end = consumeEmojiSuffix(end)
+                    continue
+                }
+            }
+        }
+        break
+    }
+    return substring(startIndex, end)
+}
+
+private fun String.consumeEmojiSuffix(startIndex: Int): Int {
+    var end = startIndex
+    while (end < length) {
+        val codePoint = codePointAt(end)
+        if (
+            codePoint.isEmojiVariationSelector() ||
+            codePoint.isEmojiSkinToneModifier() ||
+            codePoint.isEmojiTagCharacter() ||
+            codePoint == 0x20E3
+        ) {
+            end += Character.charCount(codePoint)
+        } else {
+            break
+        }
+    }
+    return end
+}
+
+private fun Int.isEmojiCodePoint(): Boolean =
+    isRegionalIndicatorSymbol() ||
+        this in 0x1F000..0x1FAFF ||
+        this in 0x2600..0x27BF ||
+        this in 0x2B00..0x2BFF ||
+        this in 0x2300..0x23FF ||
+        this == 0x3030 ||
+        this == 0x303D ||
+        this == 0x3297 ||
+        this == 0x3299
+
+private fun Int.isEmojiVariationSelector(): Boolean = this == 0xFE0E || this == 0xFE0F
+
+private fun Int.isEmojiSkinToneModifier(): Boolean = this in 0x1F3FB..0x1F3FF
+
+private fun Int.isEmojiTagCharacter(): Boolean = this in 0xE0020..0xE007F
+
+private fun ServerProfile.markerText(displayName: String): String {
+    val initials = displayName
+        .split(Regex("[\\s|#._\\-]+"))
+        .mapNotNull { part -> part.firstOrNull { it.isLetterOrDigit() }?.toString() }
+        .take(2)
+        .joinToString(separator = "")
+    return initials
+        .ifBlank { displayName.take(2) }
+        .uppercase(Locale.getDefault())
+        .take(2)
+}
+
+private fun ServerProfile.markerColor(displayName: String): Color {
+    val value = displayName.lowercase(Locale.getDefault())
+    return when {
+        "герман" in value || "germany" in value || "deutsch" in value -> Color(0xFFD8212F)
+        "нидер" in value || "nether" in value || "holland" in value -> Color(0xFF3755A3)
+        "фин" in value || "finland" in value -> Color(0xFF2C62B0)
+        "рос" in value || "russia" in value -> Color(0xFFB9333C)
+        "usa" in value || "сша" in value || "gemini" in value -> Color(0xFF3159A2)
+        "lte" in value || "обход" in value -> Color(0xFF126F63)
+        else -> serverMarkerPalette[Math.floorMod(id.value.hashCode(), serverMarkerPalette.size)]
+    }
+}
 
 private fun olcRtcCarrierLabel(carrier: String): String = when (carrier.lowercase(Locale.US)) {
     "wbstream" -> "WB Stream"

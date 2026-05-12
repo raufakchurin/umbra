@@ -8,6 +8,7 @@ plugins {
 android {
     namespace = "ru.myit.vlevpn.runtime.olcrtc"
     compileSdk = 35
+    ndkVersion = "28.0.13004108"
 
     defaultConfig {
         minSdk = 23
@@ -30,7 +31,7 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = true
+            useLegacyPackaging = false
         }
     }
 }

@@ -13,7 +13,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 object QuickCommandParser {
     const val CANONICAL_SCHEME = "vlevpn"
-    private val supportedSchemes = listOf(CANONICAL_SCHEME, "vle")
+    private val supportedSchemes = listOf(CANONICAL_SCHEME, "umbra", "vle")
     private val packageRegex = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$")
     private val splitRegex = Regex("[,\\n\\r\\t ]+")
     private val json = Json { ignoreUnknownKeys = true }

@@ -24,6 +24,7 @@ interface SettingsRepository {
     suspend fun updateSubscriptionProvider(providerId: String, domainHash: String)
     suspend fun updateInterface(language: AppLanguage, textSize: AppTextSize)
     suspend fun updateAppearance(accentColor: AppAccentColor, backgroundStyle: AppBackgroundStyle)
+    suspend fun updateLocalBrandingOverride(enabled: Boolean)
     suspend fun markProviderTelemetrySent(sentAtMillis: Long)
     suspend fun resetToDefaults()
 }

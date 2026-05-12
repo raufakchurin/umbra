@@ -3,13 +3,20 @@ package ru.myit.vlevpn.ui.servers
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -33,6 +40,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -84,21 +95,57 @@ private fun ServerEditorScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconButton(onClick = onCancel) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier
+                    .size(44.dp)
+                    .shadow(
+                        elevation = 10.dp,
+                        shape = RoundedCornerShape(16.dp),
+                        clip = false,
+                        ambientColor = Color(0xFF071312).copy(alpha = 0.06f),
+                        spotColor = Color(0xFF071312).copy(alpha = 0.08f),
+                    )
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
+            ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                "Server editor",
+                "Редактор сервера",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 8.dp),
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
             )
+            IconButton(
+                onClick = onSave,
+                modifier = Modifier
+                    .size(44.dp)
+                    .shadow(
+                        elevation = 10.dp,
+                        shape = RoundedCornerShape(16.dp),
+                        clip = false,
+                        ambientColor = Color(0xFF071312).copy(alpha = 0.06f),
+                        spotColor = Color(0xFF071312).copy(alpha = 0.08f),
+                    )
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
+            ) {
+                Icon(Icons.Default.Save, contentDescription = "Save")
+            }
         }
         OutlinedTextField(
             value = draft.name,
@@ -139,7 +186,11 @@ private fun ServerEditorScreen(
             OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
                 Text("Cancel")
             }
-            Button(onClick = onSave, modifier = Modifier.weight(1f)) {
+            Button(
+                onClick = onSave,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(27.dp),
+            ) {
                 Icon(Icons.Default.Save, contentDescription = "Save")
                 Text("Save")
             }
@@ -333,20 +384,38 @@ private fun ProtocolPicker(
     selected: ProxyProtocol,
     onSelect: (ProxyProtocol) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Column {
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(selected.displayName)
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "ПРОТОКОЛ",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             ProxyProtocol.entries.forEach { protocol ->
-                DropdownMenuItem(
-                    text = { Text(protocol.displayName) },
-                    onClick = {
-                        expanded = false
-                        onSelect(protocol)
-                    },
-                )
+                val selectedProtocol = protocol == selected
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (selectedProtocol) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+                        .border(
+                            width = 1.dp,
+                            color = if (selectedProtocol) MaterialTheme.colorScheme.primary.copy(alpha = 0.32f) else MaterialTheme.colorScheme.outline,
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        .clickable { onSelect(protocol) }
+                        .padding(horizontal = 17.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        protocol.displayName,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selectedProtocol) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

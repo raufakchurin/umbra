@@ -23,6 +23,15 @@ data class AppSettings(
     val appTextSize: AppTextSize,
     val appAccentColor: AppAccentColor,
     val appBackgroundStyle: AppBackgroundStyle,
+    val localBrandingOverrideEnabled: Boolean = false,
+    val remoteBrandingProviderId: String = "",
+    val remoteBrandingPriority: Int = 100,
+    val remoteBrandingImagePath: String = "",
+    val remoteBrandingImageSha256: String = "",
+    val remoteBrandingBlurPercent: Int = 35,
+    val remoteBrandingAccentColor: String = "",
+    val remoteBrandingBackgroundColor: String = "",
+    val remoteBrandingUpdatedAt: String = "",
 ) {
     companion object {
         val Default = AppSettings(
@@ -48,6 +57,15 @@ data class AppSettings(
             appTextSize = AppTextSize.NORMAL,
             appAccentColor = AppAccentColor.TEAL,
             appBackgroundStyle = AppBackgroundStyle.LIGHT,
+            localBrandingOverrideEnabled = false,
+            remoteBrandingProviderId = "",
+            remoteBrandingPriority = 100,
+            remoteBrandingImagePath = "",
+            remoteBrandingImageSha256 = "",
+            remoteBrandingBlurPercent = 35,
+            remoteBrandingAccentColor = "",
+            remoteBrandingBackgroundColor = "",
+            remoteBrandingUpdatedAt = "",
         )
     }
 }

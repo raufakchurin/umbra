@@ -206,6 +206,109 @@ class RuntimeConnectionManagerTest {
     }
 
     @Test
+    fun selectAndConnectStartsTappedServerWhenIdleAndAutoConnectIsDisabled() = runBlocking {
+        val selected = server("server-1")
+        val tapped = server("server-2")
+        val fallback = server("server-3")
+        val settings = AppSettings.Default.copy(autoConnectMode = AutoConnectMode.DISABLED)
+        val serverRepository = FakeServerRepository(listOf(selected, tapped, fallback), selected.id)
+        val runtime = FakeProxyRuntime()
+        val manager = manager(
+            serverRepository = serverRepository,
+            settingsRepository = FakeSettingsRepository(settings),
+            pingRepository = FakePingRepository(
+                delays = mapOf(
+                    selected.id to null,
+                    tapped.id to null,
+                    fallback.id to 1L,
+                ),
+            ),
+            runtime = runtime,
+        )
+
+        manager.selectAndConnect(tapped.id)
+
+        assertEquals(tapped.id, serverRepository.selectedServerId.value)
+        assertEquals(tapped.id, runtime.startedRequests.single().server.id)
+    }
+
+    @Test
+    fun selectAndConnectChecksTappedServerFirstThenUsesAutoconnectScenario() = runBlocking {
+        val selected = server("server-1")
+        val tapped = server("server-2")
+        val fallback = server("server-3")
+        val settings = AppSettings.Default.copy(autoConnectMode = AutoConnectMode.LOWEST_PING)
+        val serverRepository = FakeServerRepository(listOf(selected, tapped, fallback), selected.id)
+        val runtime = FakeProxyRuntime()
+        val manager = manager(
+            serverRepository = serverRepository,
+            settingsRepository = FakeSettingsRepository(settings),
+            pingRepository = FakePingRepository(
+                delays = mapOf(
+                    selected.id to 100L,
+                    tapped.id to null,
+                    fallback.id to 1L,
+                ),
+            ),
+            runtime = runtime,
+        )
+
+        manager.selectAndConnect(tapped.id)
+
+        assertEquals(fallback.id, serverRepository.selectedServerId.value)
+        assertEquals(fallback.id, runtime.startedRequests.single().server.id)
+    }
+
+    @Test
+    fun selectAndConnectUsesTappedServerWhenAutoconnectPingSucceeds() = runBlocking {
+        val selected = server("server-1")
+        val tapped = server("server-2")
+        val fasterButNotTapped = server("server-3")
+        val settings = AppSettings.Default.copy(autoConnectMode = AutoConnectMode.LOWEST_PING)
+        val serverRepository = FakeServerRepository(listOf(selected, tapped, fasterButNotTapped), selected.id)
+        val runtime = FakeProxyRuntime()
+        val manager = manager(
+            serverRepository = serverRepository,
+            settingsRepository = FakeSettingsRepository(settings),
+            pingRepository = FakePingRepository(
+                delays = mapOf(
+                    selected.id to null,
+                    tapped.id to 30L,
+                    fasterButNotTapped.id to 1L,
+                ),
+            ),
+            runtime = runtime,
+        )
+
+        manager.selectAndConnect(tapped.id)
+
+        assertEquals(tapped.id, serverRepository.selectedServerId.value)
+        assertEquals(tapped.id, runtime.startedRequests.single().server.id)
+    }
+
+    @Test
+    fun selectAndConnectStopsRunningRuntimeBeforeStartingTappedOlcRtcServer() = runBlocking {
+        val xray = server("xray-server")
+        val olcRtc = server("olcrtc-server", ProxyProtocol.OLCRTC)
+        val serverRepository = FakeServerRepository(listOf(xray, olcRtc), xray.id)
+        val runtime = FakeProxyRuntime()
+        val manager = manager(
+            serverRepository = serverRepository,
+            settingsRepository = FakeSettingsRepository(AppSettings.Default),
+            pingRepository = FakePingRepository(delays = emptyMap()),
+            runtime = runtime,
+        )
+        manager.connectSelectedProfile()
+
+        manager.selectAndConnect(olcRtc.id)
+
+        assertEquals(1, runtime.stopCount)
+        assertEquals(listOf(xray.id, olcRtc.id), runtime.startedRequests.map { it.server.id })
+        assertEquals(ProxyProtocol.OLCRTC, runtime.startedRequests.last().server.protocol)
+        assertEquals(olcRtc.id, serverRepository.selectedServerId.value)
+    }
+
+    @Test
     fun disconnectCancelsPendingAutoconnectBeforeRuntimeStart() = runBlocking {
         val selected = server("server-1")
         val stateStore = RuntimeStateStore()
@@ -289,11 +392,11 @@ class RuntimeConnectionManagerTest {
             logs = FakeLogRepository(),
         )
 
-    private fun server(id: String): ServerProfile =
+    private fun server(id: String, protocol: ProxyProtocol = ProxyProtocol.VLESS): ServerProfile =
         ServerProfile(
             id = ServerId(id),
             name = id,
-            protocol = ProxyProtocol.VLESS,
+            protocol = protocol,
             host = "$id.example.com",
             port = 443,
             credential = "00000000-0000-4000-8000-000000000001",
@@ -372,6 +475,7 @@ private class FakeSettingsRepository(
         accentColor: ru.myit.vlevpn.domain.model.AppAccentColor,
         backgroundStyle: ru.myit.vlevpn.domain.model.AppBackgroundStyle,
     ) = Unit
+    override suspend fun updateLocalBrandingOverride(enabled: Boolean) = Unit
     override suspend fun markProviderTelemetrySent(sentAtMillis: Long) = Unit
     override suspend fun resetToDefaults() {
         settings.value = AppSettings.Default.copy(selectedServerId = settings.value.selectedServerId)
@@ -407,6 +511,7 @@ private class FakeProxyRuntime(
     private val stopDelayMillis: Long = 0L,
 ) : ProxyRuntime {
     val startedRequests = mutableListOf<StartProxyRequest>()
+    var stopCount = 0
     override val state = MutableStateFlow<RuntimeState>(RuntimeState.Idle)
     override val stats = MutableStateFlow(RuntimeStats())
 
@@ -419,6 +524,7 @@ private class FakeProxyRuntime(
     }
 
     override suspend fun stop() {
+        stopCount += 1
         if (stopDelayMillis > 0L) {
             state.value = RuntimeState.Stopping
             delay(stopDelayMillis)

@@ -138,6 +138,16 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun updateLocalBrandingOverride(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateLocalBrandingOverride(enabled)
+            message.value = when (uiState.value.settings.appLanguage) {
+                AppLanguage.RU -> if (enabled) "Ваше оформление имеет приоритет" else "Партнерское оформление снова может применяться"
+                AppLanguage.EN -> if (enabled) "Your appearance has priority" else "Partner appearance can apply again"
+            }
+        }
+    }
+
     fun toggleExcludedApp(packageName: String, excluded: Boolean) {
         val current = uiState.value.settings.excludedAppPackages
         val next = if (excluded) {

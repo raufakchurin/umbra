@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.VleVpn" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#FAFAFA</item>
+        <item name="android:colorAccent">#136F63</item>
+        <item name="android:windowBackground">@color/umbra_splash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/umbra_splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/umbra_splash_logo</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+    </style>
+</resources>

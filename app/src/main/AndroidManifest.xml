@@ -19,8 +19,9 @@
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@drawable/ic_vpn_key_24"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.VleVpn"
         android:usesCleartextTraffic="false">
@@ -43,6 +44,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="vlevpn" />
+                <data android:scheme="umbra" />
                 <data android:scheme="vle" />
                 <data android:scheme="vless" />
                 <data android:scheme="vmess" />

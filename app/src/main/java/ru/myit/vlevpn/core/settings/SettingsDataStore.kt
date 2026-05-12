@@ -80,6 +80,18 @@ class SettingsDataStore @Inject constructor(
             appBackgroundStyle = preferences[Keys.AppBackgroundStyle]
                 ?.let { value -> runCatching { AppBackgroundStyle.valueOf(value) }.getOrNull() }
                 ?: defaults.appBackgroundStyle,
+            localBrandingOverrideEnabled = preferences[Keys.LocalBrandingOverrideEnabled]
+                ?: defaults.localBrandingOverrideEnabled,
+            remoteBrandingProviderId = preferences[Keys.RemoteBrandingProviderId].orEmpty(),
+            remoteBrandingPriority = preferences[Keys.RemoteBrandingPriority]
+                ?: defaults.remoteBrandingPriority,
+            remoteBrandingImagePath = preferences[Keys.RemoteBrandingImagePath].orEmpty(),
+            remoteBrandingImageSha256 = preferences[Keys.RemoteBrandingImageSha256].orEmpty(),
+            remoteBrandingBlurPercent = preferences[Keys.RemoteBrandingBlurPercent]
+                ?: defaults.remoteBrandingBlurPercent,
+            remoteBrandingAccentColor = preferences[Keys.RemoteBrandingAccentColor].orEmpty(),
+            remoteBrandingBackgroundColor = preferences[Keys.RemoteBrandingBackgroundColor].orEmpty(),
+            remoteBrandingUpdatedAt = preferences[Keys.RemoteBrandingUpdatedAt].orEmpty(),
         )
     }
 
@@ -178,6 +190,47 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    suspend fun updateLocalBrandingOverride(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[Keys.LocalBrandingOverrideEnabled] = enabled
+        }
+    }
+
+    suspend fun updateRemoteBranding(
+        providerId: String,
+        priority: Int,
+        imagePath: String,
+        imageSha256: String,
+        blurPercent: Int,
+        accentColor: String,
+        backgroundColor: String,
+        updatedAt: String,
+    ) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[Keys.RemoteBrandingProviderId] = providerId
+            preferences[Keys.RemoteBrandingPriority] = priority
+            preferences[Keys.RemoteBrandingImagePath] = imagePath
+            preferences[Keys.RemoteBrandingImageSha256] = imageSha256
+            preferences[Keys.RemoteBrandingBlurPercent] = blurPercent.coerceIn(5, 90)
+            preferences[Keys.RemoteBrandingAccentColor] = accentColor
+            preferences[Keys.RemoteBrandingBackgroundColor] = backgroundColor
+            preferences[Keys.RemoteBrandingUpdatedAt] = updatedAt
+        }
+    }
+
+    suspend fun clearRemoteBranding() {
+        context.settingsDataStore.edit { preferences ->
+            preferences.remove(Keys.RemoteBrandingProviderId)
+            preferences.remove(Keys.RemoteBrandingPriority)
+            preferences.remove(Keys.RemoteBrandingImagePath)
+            preferences.remove(Keys.RemoteBrandingImageSha256)
+            preferences.remove(Keys.RemoteBrandingBlurPercent)
+            preferences.remove(Keys.RemoteBrandingAccentColor)
+            preferences.remove(Keys.RemoteBrandingBackgroundColor)
+            preferences.remove(Keys.RemoteBrandingUpdatedAt)
+        }
+    }
+
     suspend fun markProviderTelemetrySent(sentAtMillis: Long) {
         context.settingsDataStore.edit { preferences ->
             preferences[Keys.ProviderTelemetryLastSentAtMillis] = sentAtMillis
@@ -203,7 +256,17 @@ class SettingsDataStore @Inject constructor(
             preferences.remove(Keys.AppTextSize)
             preferences.remove(Keys.AppAccentColor)
             preferences.remove(Keys.AppBackgroundStyle)
+            preferences.remove(Keys.LocalBrandingOverrideEnabled)
+            preferences.remove(Keys.RemoteBrandingProviderId)
+            preferences.remove(Keys.RemoteBrandingPriority)
+            preferences.remove(Keys.RemoteBrandingImagePath)
+            preferences.remove(Keys.RemoteBrandingImageSha256)
+            preferences.remove(Keys.RemoteBrandingBlurPercent)
+            preferences.remove(Keys.RemoteBrandingAccentColor)
+            preferences.remove(Keys.RemoteBrandingBackgroundColor)
+            preferences.remove(Keys.RemoteBrandingUpdatedAt)
         }
+        context.filesDir.resolve("branding").deleteRecursively()
     }
 
     suspend fun getOrCreateSubscriptionInstallId(): String {
@@ -338,6 +401,15 @@ class SettingsDataStore @Inject constructor(
         val AppTextSize = stringPreferencesKey("app_text_size")
         val AppAccentColor = stringPreferencesKey("app_accent_color")
         val AppBackgroundStyle = stringPreferencesKey("app_background_style")
+        val LocalBrandingOverrideEnabled = booleanPreferencesKey("local_branding_override_enabled")
+        val RemoteBrandingProviderId = stringPreferencesKey("remote_branding_provider_id")
+        val RemoteBrandingPriority = intPreferencesKey("remote_branding_priority")
+        val RemoteBrandingImagePath = stringPreferencesKey("remote_branding_image_path")
+        val RemoteBrandingImageSha256 = stringPreferencesKey("remote_branding_image_sha256")
+        val RemoteBrandingBlurPercent = intPreferencesKey("remote_branding_blur_percent")
+        val RemoteBrandingAccentColor = stringPreferencesKey("remote_branding_accent_color")
+        val RemoteBrandingBackgroundColor = stringPreferencesKey("remote_branding_background_color")
+        val RemoteBrandingUpdatedAt = stringPreferencesKey("remote_branding_updated_at")
     }
 
     private companion object {

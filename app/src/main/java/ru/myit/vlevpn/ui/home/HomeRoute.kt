@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,6 +49,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,11 +57,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.collectLatest
 import ru.myit.vlevpn.BuildConfig
+import ru.myit.vlevpn.R
 import ru.myit.vlevpn.runtime.RuntimeState
 import ru.myit.vlevpn.domain.model.AppLanguage
+import ru.myit.vlevpn.domain.model.ServerId
 import ru.myit.vlevpn.ui.i18n.LocalAppLanguage
 import ru.myit.vlevpn.ui.i18n.localized
 import ru.myit.vlevpn.ui.servers.ServerProfilesContent
+import ru.myit.vlevpn.ui.servers.ServerPingUiState
 import ru.myit.vlevpn.ui.servers.ServersViewModel
 import ru.myit.vlevpn.ui.servers.readClipboardText
 import ru.myit.vlevpn.ui.shared.TranslucentSnackbarHost
@@ -76,11 +81,19 @@ fun HomeRoute(
     val serversState by serversViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var pendingVpnAction by remember { mutableStateOf<PendingVpnAction?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
+        val pendingAction = pendingVpnAction
+        pendingVpnAction = null
         if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.connect()
+            when (pendingAction) {
+                is PendingVpnAction.SelectServer -> serversViewModel.selectAndConnect(pendingAction.serverId)
+                PendingVpnAction.Connect,
+                null,
+                -> viewModel.connect()
+            }
         } else {
             viewModel.onPermissionDenied()
         }
@@ -112,6 +125,7 @@ fun HomeRoute(
                 } else {
                     val prepareIntent = VpnService.prepare(context)
                     if (prepareIntent != null) {
+                        pendingVpnAction = PendingVpnAction.Connect
                         viewModel.markPreparingPermission()
                         permissionLauncher.launch(prepareIntent)
                     } else {
@@ -121,7 +135,16 @@ fun HomeRoute(
             },
             onAddServer = onAddServer,
             onEditServer = onEditServer,
-            onSelectServer = serversViewModel::select,
+            onSelectServer = { serverId ->
+                val prepareIntent = VpnService.prepare(context)
+                if (prepareIntent != null) {
+                    pendingVpnAction = PendingVpnAction.SelectServer(serverId)
+                    viewModel.markPreparingPermission()
+                    permissionLauncher.launch(prepareIntent)
+                } else {
+                    serversViewModel.selectAndConnect(serverId)
+                }
+            },
             onDeleteServer = serversViewModel::delete,
             onDeleteGroup = serversViewModel::deleteGroup,
             onRefreshGroup = serversViewModel::refreshGroup,
@@ -133,6 +156,11 @@ fun HomeRoute(
             modifier = Modifier.padding(padding),
         )
     }
+}
+
+private sealed interface PendingVpnAction {
+    data object Connect : PendingVpnAction
+    data class SelectServer(val serverId: ServerId) : PendingVpnAction
 }
 
 @Composable
@@ -170,15 +198,15 @@ private fun HomeScreen(
         isBusy -> localized(language, "Подключение", "Connecting")
         else -> localized(language, "Подключить", "Connect")
     }
-    val statusText = state.runtimeState.homeStatusText(language)
+    val selectedPing = serversState.selectedServerId?.let { serversState.pingResults[it] }
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 104.dp),
+            .padding(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 94.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -186,7 +214,12 @@ private fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                Text("VLE VPN", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
                 Text(
                     text = "v${BuildConfig.VERSION_NAME}",
                     style = MaterialTheme.typography.labelSmall,
@@ -199,77 +232,28 @@ private fun HomeScreen(
                 onImportClipboard = onImportClipboard,
             )
         }
-        Card(
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.surface,
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.44f),
-                            ),
-                        ),
-                    )
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = state.selectedServer?.let { server ->
-                        val protocolName = if (server.subscriptionId.isNotBlank() && server.isOlcRtc) {
-                            "VLESS"
-                        } else {
-                            server.protocol.displayName
-                        }
-                        "${server.name} · $protocolName"
-                    }
-                        ?: localized(language, "Сервер не выбран", "No server selected"),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(184.dp),
-                    contentAlignment = Alignment.BottomCenter,
-                ) {
-                    statusText?.let { text ->
-                        Text(
-                            text = text,
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(horizontal = 12.dp),
-                            color = if (state.runtimeState is RuntimeState.Error) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    PremiumPowerButton(
-                        enabled = isRunning || (state.selectedServer != null && !isBusy),
-                        running = isRunning,
-                        busy = isBusy,
-                        label = buttonText,
-                        contentDescription = buttonDescription,
-                        onClick = onConnectToggle,
-                    )
+        CompactConnectionCard(
+            selectedServerLabel = state.selectedServer?.let { server ->
+                val protocolName = if (server.subscriptionId.isNotBlank() && server.isOlcRtc) {
+                    "VLESS"
+                } else {
+                    server.protocol.displayName
                 }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            StatCard(localized(language, "Исходящий", "Uplink"), formatBytes(state.stats.uplinkBytes), Modifier.weight(1f))
-            StatCard(localized(language, "Входящий", "Downlink"), formatBytes(state.stats.downlinkBytes), Modifier.weight(1f))
-        }
+                "${server.name} · $protocolName"
+            } ?: localized(language, "Сервер не выбран", "No server selected"),
+            statusLabel = state.runtimeState.connectionChipText(language),
+            statusIsError = state.runtimeState is RuntimeState.Error,
+            latencyLabel = selectedPing.connectionLatencyLabel(language),
+            uplinkLabel = "↑ ${formatBytes(state.stats.uplinkBytes)}",
+            downlinkLabel = "↓ ${formatBytes(state.stats.downlinkBytes)}",
+            powerEnabled = isRunning || (state.selectedServer != null && !isBusy),
+            running = isRunning,
+            busy = isBusy,
+            buttonText = buttonText,
+            buttonDescription = buttonDescription,
+            onConnectToggle = onConnectToggle,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         ServerProfilesContent(
             state = serversState,
@@ -284,7 +268,147 @@ private fun HomeScreen(
             onImportClipboard = onImportClipboard,
             modifier = Modifier.fillMaxWidth(),
             title = localized(language, "Профили", "Profiles"),
+            titleBadge = if (serversState.groups.isNotEmpty()) {
+                localized(language, "первая подписка", "first subscription")
+            } else {
+                null
+            },
             showAddActions = false,
+        )
+    }
+}
+
+@Composable
+private fun CompactConnectionCard(
+    selectedServerLabel: String,
+    statusLabel: String,
+    statusIsError: Boolean,
+    latencyLabel: String,
+    uplinkLabel: String,
+    downlinkLabel: String,
+    powerEnabled: Boolean,
+    running: Boolean,
+    busy: Boolean,
+    buttonText: String,
+    buttonDescription: String,
+    onConnectToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(30.dp)
+    Card(
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = modifier
+            .shadow(
+                elevation = 22.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Color(0xFF071312).copy(alpha = 0.07f),
+                spotColor = Color(0xFF071312).copy(alpha = 0.10f),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.86f), shape),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(176.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.surface,
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                        ),
+                    ),
+                )
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = selectedServerLabel,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 8.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(bottom = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ConnectionChip(
+                    text = statusLabel,
+                    selected = running && !statusIsError,
+                    error = statusIsError,
+                )
+                ConnectionChip(text = latencyLabel)
+            }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ConnectionChip(text = uplinkLabel)
+                ConnectionChip(text = downlinkLabel)
+            }
+            PremiumPowerButton(
+                enabled = powerEnabled,
+                running = running,
+                busy = busy,
+                label = buttonText,
+                contentDescription = buttonDescription,
+                onClick = onConnectToggle,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(y = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConnectionChip(
+    text: String,
+    selected: Boolean = false,
+    error: Boolean = false,
+) {
+    val background = when {
+        error -> MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+        selected -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f)
+    }
+    val content = when {
+        error -> MaterialTheme.colorScheme.error
+        selected -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(13.dp))
+            .background(background)
+            .border(
+                width = 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outline,
+                shape = RoundedCornerShape(13.dp),
+            )
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = content,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
         )
     }
 }
@@ -317,9 +441,15 @@ private fun PremiumPowerButton(
 
     Box(
         modifier = modifier
-            .size(152.dp)
+            .size(124.dp)
             .alpha(if (enabled) 1f else 0.48f)
-            .shadow(26.dp, CircleShape, clip = false)
+            .shadow(
+                elevation = 30.dp,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = glowColor.copy(alpha = 0.20f),
+                spotColor = glowColor.copy(alpha = 0.24f),
+            )
             .clip(CircleShape)
             .background(gradient)
             .border(1.dp, Color.White.copy(alpha = 0.56f), CircleShape)
@@ -329,25 +459,25 @@ private fun PremiumPowerButton(
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .padding(10.dp)
+                .padding(8.dp)
                 .border(2.dp, Color.White.copy(alpha = if (busy) 0.22f else 0.34f), CircleShape),
         )
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .padding(23.dp)
+                .padding(20.dp)
                 .background(glowColor.copy(alpha = 0.18f), CircleShape),
         )
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(
                 Icons.Default.PowerSettingsNew,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(54.dp),
+                modifier = Modifier.size(40.dp),
                 tint = Color.White,
             )
             Text(
                 label.uppercase(),
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
             )
@@ -355,18 +485,37 @@ private fun PremiumPowerButton(
     }
 }
 
-private fun RuntimeState.homeStatusText(language: AppLanguage): String? = when (this) {
-    RuntimeState.Idle -> null
-    RuntimeState.PreparingVpnPermission -> localized(language, "Ожидаем разрешение VPN", "Waiting for VPN permission")
-    RuntimeState.StartingForeground -> localized(language, "Запускаем VPN", "Starting VPN")
-    RuntimeState.BuildingConfig -> localized(language, "Проверяем серверы", "Checking servers")
-    RuntimeState.EstablishingVpn -> localized(language, "Создаем VPN-туннель", "Creating VPN tunnel")
-    RuntimeState.StartingNativeCore -> localized(language, "Запускаем VPN-ядро", "Starting VPN core")
-    RuntimeState.VerifyingConnection -> localized(language, "Проверяем соединение", "Verifying connection")
-    is RuntimeState.Running -> null
-    RuntimeState.Stopping -> localized(language, "Останавливаем VPN", "Stopping VPN")
-    is RuntimeState.Error -> message
+private fun RuntimeState.connectionChipText(language: AppLanguage): String = when (this) {
+    RuntimeState.Idle -> localized(language, "Готово", "Ready")
+    RuntimeState.PreparingVpnPermission -> localized(language, "Разрешение", "Permission")
+    RuntimeState.StartingForeground -> localized(language, "Запуск", "Starting")
+    RuntimeState.BuildingConfig -> localized(language, "Проверка", "Checking")
+    RuntimeState.EstablishingVpn -> localized(language, "Туннель", "Tunnel")
+    RuntimeState.StartingNativeCore -> localized(language, "Ядро", "Core")
+    RuntimeState.VerifyingConnection -> localized(language, "Проверка", "Checking")
+    is RuntimeState.Running -> localized(language, "Подключено", "Connected")
+    RuntimeState.Stopping -> localized(language, "Остановка", "Stopping")
+    is RuntimeState.Error -> shortErrorChip(language)
 }
+
+private fun RuntimeState.Error.shortErrorChip(language: AppLanguage): String {
+    val normalized = message.lowercase()
+    return when {
+        "недоступ" in normalized || "unavailable" in normalized -> localized(language, "Недоступен", "Unavailable")
+        else -> localized(language, "Ошибка", "Error")
+    }
+}
+
+private fun ServerPingUiState?.connectionLatencyLabel(language: AppLanguage): String = when {
+    this == null -> unavailableLabel(language)
+    checking -> "..."
+    delayMs != null -> localized(language, "${delayMs} мс", "${delayMs} ms")
+    error != null -> unavailableLabel(language)
+    else -> unavailableLabel(language)
+}
+
+private fun unavailableLabel(language: AppLanguage): String =
+    localized(language, "н/д", "n/a")
 
 @Composable
 private fun AddProfileMenu(
@@ -380,14 +529,23 @@ private fun AddProfileMenu(
     Box(modifier = modifier) {
         FloatingActionButton(
             onClick = { expanded = true },
-            modifier = Modifier.size(56.dp),
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .size(48.dp)
+                .shadow(
+                    elevation = 14.dp,
+                    shape = RoundedCornerShape(16.dp),
+                    clip = false,
+                    ambientColor = Color(0xFF071312).copy(alpha = 0.08f),
+                    spotColor = Color(0xFF071312).copy(alpha = 0.10f),
+                ),
+            shape = RoundedCornerShape(16.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.primary,
         ) {
             Icon(
                 Icons.Default.Add,
                 contentDescription = localized(language, "Добавить профиль", "Add profile"),
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(30.dp),
             )
         }
         DropdownMenu(
@@ -425,25 +583,6 @@ private fun AddProfileMenu(
                     .width(320.dp)
                     .padding(vertical = 6.dp),
             )
-        }
-    }
-}
-
-@Composable
-private fun StatCard(title: String, value: String, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(value, style = MaterialTheme.typography.headlineSmall)
         }
     }
 }

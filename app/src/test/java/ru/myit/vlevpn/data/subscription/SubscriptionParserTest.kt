@@ -10,6 +10,33 @@ class SubscriptionParserTest {
     private val parser = SubscriptionParser()
 
     @Test
+    fun extractsSubscriptionUrlFromClipboardText() {
+        val input = "Вот реальная подписка https://key.vlesvpn.ru/rem/sub/DSGT80 для теста"
+
+        assertEquals(
+            "https://key.vlesvpn.ru/rem/sub/DSGT80",
+            input.normalizedImportInput(),
+        )
+    }
+
+    @Test
+    fun extractsSubscriptionUrlFromClipboardHtml() {
+        val input = """<a href="https://key.vlesvpn.ru/rem/sub/DSGT80">Vless VPN</a>"""
+
+        assertEquals(
+            "https://key.vlesvpn.ru/rem/sub/DSGT80",
+            input.normalizedImportInput(),
+        )
+    }
+
+    @Test
+    fun keepsDirectConfigInputWithSpacesInFragment() {
+        val input = "vless://00000000-0000-4000-8000-000000000001@example.com:443#Россия | YouTube без рекламы"
+
+        assertEquals(input, input.normalizedImportInput())
+    }
+
+    @Test
     fun parsesSingleVlessUri() {
         val result = parser.parse(
             "vless://00000000-0000-4000-8000-000000000001@example.com:443" +
@@ -87,6 +114,22 @@ class SubscriptionParserTest {
         assertEquals("0.0.0.0", result.profiles[0].host)
         assertEquals(1, result.profiles[0].port)
         assertEquals(result.profiles[0].subscriptionId, result.profiles[1].subscriptionId)
+    }
+
+    @Test
+    fun parsesPlaceholdersWithUnescapedFragmentText() {
+        val result = parser.parse(
+            "vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1" +
+                "?encryption=none&type=tcp&security=none&path=/%bad" +
+                "#Приложение не поддерживается 100%",
+            sourceHint = "https://example.com/sub/token",
+            metadata = SubscriptionMetadata(title = "Subscription"),
+        )
+
+        val profile = result.profiles.single()
+        assertEquals("Приложение не поддерживается 100%", profile.name)
+        assertEquals("/%bad", profile.path)
+        assertEquals(0, result.skippedCount)
     }
 
     @Test

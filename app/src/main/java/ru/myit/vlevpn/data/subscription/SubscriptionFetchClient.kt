@@ -1,10 +1,13 @@
 package ru.myit.vlevpn.data.subscription
 
 import android.util.Base64
+import java.io.IOException
 import java.net.URL
+import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -44,32 +47,34 @@ class SubscriptionFetchClient @Inject constructor(
 
         val request = requestBuilder.build()
 
-        okHttpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                error("Subscription request failed: HTTP ${response.code}")
+        executeWithNetworkRetry {
+            okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("Subscription request failed: HTTP ${response.code}")
+                }
+                SubscriptionFetchResult(
+                    body = response.body?.string().orEmpty(),
+                    metadata = SubscriptionMetadata(
+                        title = response.header("profile-title").orEmpty().decodeBase64PrefixedHeader(),
+                        updateIntervalHours = response.header("profile-update-interval").orEmpty().toIntOrNull() ?: 0,
+                        uploadBytes = response.header("subscription-userinfo").orEmpty().userinfoLong("upload"),
+                        downloadBytes = response.header("subscription-userinfo").orEmpty().userinfoLong("download"),
+                        totalBytes = response.header("subscription-userinfo").orEmpty().userinfoLong("total"),
+                        expireAtMillis = response.header("subscription-userinfo").orEmpty().userinfoLong("expire")
+                            .takeIf { it > 0L }
+                            ?.let { it * 1000L }
+                            ?: 0L,
+                        supportUrl = response.header("support-url").orEmpty(),
+                        webPageUrl = response.header("profile-web-page-url").orEmpty(),
+                        announce = response.header("announce").orEmpty().decodeBase64PrefixedHeader(),
+                        updateAlways = response.header("update-always").isTruthyHeader() ||
+                            response.header("profile-update-always").isTruthyHeader(),
+                        providerId = response.partnerIdHeader().ifBlank { partnerIdFromUrl },
+                        providerDomainHash = providerDomainHash,
+                        extraKeysAddUrl = response.header("extra-keys-add").orEmpty().trim(),
+                    ),
+                )
             }
-            SubscriptionFetchResult(
-                body = response.body?.string().orEmpty(),
-                metadata = SubscriptionMetadata(
-                    title = response.header("profile-title").orEmpty().decodeBase64PrefixedHeader(),
-                    updateIntervalHours = response.header("profile-update-interval").orEmpty().toIntOrNull() ?: 0,
-                    uploadBytes = response.header("subscription-userinfo").orEmpty().userinfoLong("upload"),
-                    downloadBytes = response.header("subscription-userinfo").orEmpty().userinfoLong("download"),
-                    totalBytes = response.header("subscription-userinfo").orEmpty().userinfoLong("total"),
-                    expireAtMillis = response.header("subscription-userinfo").orEmpty().userinfoLong("expire")
-                        .takeIf { it > 0L }
-                        ?.let { it * 1000L }
-                        ?: 0L,
-                    supportUrl = response.header("support-url").orEmpty(),
-                    webPageUrl = response.header("profile-web-page-url").orEmpty(),
-                    announce = response.header("announce").orEmpty().decodeBase64PrefixedHeader(),
-                    updateAlways = response.header("update-always").isTruthyHeader() ||
-                        response.header("profile-update-always").isTruthyHeader(),
-                    providerId = response.partnerIdHeader().ifBlank { partnerIdFromUrl },
-                    providerDomainHash = providerDomainHash,
-                    extraKeysAddUrl = response.header("extra-keys-add").orEmpty().trim(),
-                ),
-            )
         }
     }
 
@@ -86,27 +91,49 @@ class SubscriptionFetchClient @Inject constructor(
             requestBuilder.header(name, value)
         }
 
-        okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
-            require(response.request.url.isHttps) {
-                "Extra keys request must stay on HTTPS"
-            }
-            if (!response.isSuccessful) {
-                error("Extra keys request failed: HTTP ${response.code}")
-            }
-            val element = json.parseToJsonElement(response.body?.string().orEmpty())
-            val keys = element.jsonObject["keys"] as? JsonArray
-                ?: error("Extra keys response must contain keys array")
+        executeWithNetworkRetry {
+            okHttpClient.newCall(requestBuilder.build()).execute().use { response ->
+                require(response.request.url.isHttps) {
+                    "Extra keys request must stay on HTTPS"
+                }
+                if (!response.isSuccessful) {
+                    error("Extra keys request failed: HTTP ${response.code}")
+                }
+                val element = json.parseToJsonElement(response.body?.string().orEmpty())
+                val keys = element.jsonObject["keys"] as? JsonArray
+                    ?: error("Extra keys response must contain keys array")
 
-            keys.mapNotNull { item ->
-                item.jsonPrimitive.contentOrNull?.trim()
-            }.filter { key ->
-                key.startsWith("olcrtc://", ignoreCase = true)
+                keys.mapNotNull { item ->
+                    item.jsonPrimitive.contentOrNull?.trim()
+                }.filter { key ->
+                    key.startsWith("olcrtc://", ignoreCase = true)
+                }
             }
         }
     }
 
+    private suspend fun <T> executeWithNetworkRetry(block: () -> T): T {
+        var lastError: IOException? = null
+        repeat(NETWORK_ATTEMPTS) { attempt ->
+            try {
+                return block()
+            } catch (error: UnknownHostException) {
+                lastError = error
+            } catch (error: IOException) {
+                lastError = error
+            }
+
+            if (attempt < NETWORK_ATTEMPTS - 1) {
+                delay(NETWORK_RETRY_DELAYS_MS.getOrElse(attempt) { NETWORK_RETRY_DELAYS_MS.last() })
+            }
+        }
+        throw lastError ?: IOException("Subscription network request failed")
+    }
+
     companion object {
         val REMNAWAVE_COMPATIBLE_USER_AGENT = "VLEVPN/${BuildConfig.VERSION_NAME} Android Xray"
+        private const val NETWORK_ATTEMPTS = 3
+        private val NETWORK_RETRY_DELAYS_MS = listOf(600L, 1_400L)
     }
 }
 

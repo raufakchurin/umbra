@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -21,10 +22,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -46,7 +54,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -86,6 +96,7 @@ fun SettingsRoute(
         onAutoConnectMode = viewModel::updateAutoConnectMode,
         onUpdateInterface = viewModel::updateInterface,
         onUpdateAppearance = viewModel::updateAppearance,
+        onLocalBrandingOverride = viewModel::updateLocalBrandingOverride,
         onToggleExcludedApp = viewModel::toggleExcludedApp,
         onRefreshApps = viewModel::refreshInstalledApps,
         onResetSettings = viewModel::resetSettings,
@@ -106,6 +117,7 @@ private fun SettingsScreen(
     onAutoConnectMode: (AutoConnectMode) -> Unit,
     onUpdateInterface: (AppLanguage, AppTextSize) -> Unit,
     onUpdateAppearance: (AppAccentColor, AppBackgroundStyle) -> Unit,
+    onLocalBrandingOverride: (Boolean) -> Unit,
     onToggleExcludedApp: (String, Boolean) -> Unit,
     onRefreshApps: () -> Unit,
     onResetSettings: () -> Unit,
@@ -121,14 +133,32 @@ private fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 104.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 108.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             if (section != SettingsSection.Menu) {
-                IconButton(onClick = onBack) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .shadow(
+                            elevation = 10.dp,
+                            shape = RoundedCornerShape(16.dp),
+                            clip = false,
+                            ambientColor = Color(0xFF071312).copy(alpha = 0.06f),
+                            spotColor = Color(0xFF071312).copy(alpha = 0.08f),
+                        )
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
+                ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             }
@@ -140,6 +170,7 @@ private fun SettingsScreen(
                 },
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
             )
         }
         state.message?.let { message ->
@@ -157,8 +188,11 @@ private fun SettingsScreen(
                 textSize = settings.appTextSize,
                 accentColor = settings.appAccentColor,
                 backgroundStyle = settings.appBackgroundStyle,
+                localBrandingOverrideEnabled = settings.localBrandingOverrideEnabled,
+                remoteBrandingProviderId = settings.remoteBrandingProviderId,
                 onUpdateInterface = onUpdateInterface,
                 onUpdateAppearance = onUpdateAppearance,
+                onLocalBrandingOverride = onLocalBrandingOverride,
             )
             SettingsSection.Advanced -> AdvancedSettingsSection(onOpenSection)
             SettingsSection.Ports -> PortsSection(
@@ -257,15 +291,25 @@ private fun SettingsMenu(
 
 @Composable
 private fun ResetSettingsButton(onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.error,
-            contentColor = MaterialTheme.colorScheme.onError,
-        ),
+    val shape = RoundedCornerShape(20.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .clip(shape)
+            .background(Color(0xFFFBE7EA))
+            .border(1.dp, Color(0xFFF0C6CC), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        Text(appText("Сбросить настройки по умолчанию", "Reset settings to defaults"))
+        Text(
+            appText("Сбросить настройки по умолчанию", "Reset settings to defaults"),
+            color = Color(0xFFB94755),
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelLarge,
+        )
     }
 }
 
@@ -299,25 +343,61 @@ private fun SettingsSectionButton(
     onOpenSection: (SettingsSection) -> Unit,
 ) {
     val language = LocalAppLanguage.current
-    OutlinedButton(
-        onClick = { onOpenSection(section) },
-        modifier = Modifier.fillMaxWidth(),
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 12.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Color(0xFF071312).copy(alpha = 0.05f),
+                spotColor = Color(0xFF071312).copy(alpha = 0.07f),
+            )
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, Color.White.copy(alpha = 0.86f), shape)
+            .clickable { onOpenSection(section) }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
         ) {
-            Column {
-                Text(section.title(language))
-                Text(
-                    section.description(language),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Icon(Icons.Default.ChevronRight, contentDescription = section.title(language))
+            Icon(
+                imageVector = section.icon(),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp),
+            )
         }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                section.title(language),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                section.description(language),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = section.title(language),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+        )
     }
 }
 
@@ -327,10 +407,13 @@ private fun InterfaceSection(
     textSize: AppTextSize,
     accentColor: AppAccentColor,
     backgroundStyle: AppBackgroundStyle,
+    localBrandingOverrideEnabled: Boolean,
+    remoteBrandingProviderId: String,
     onUpdateInterface: (AppLanguage, AppTextSize) -> Unit,
     onUpdateAppearance: (AppAccentColor, AppBackgroundStyle) -> Unit,
+    onLocalBrandingOverride: (Boolean) -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    SettingsPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(appText("Интерфейс", "Interface"), style = MaterialTheme.typography.titleMedium)
             Text(
@@ -340,6 +423,27 @@ private fun InterfaceSection(
                 ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
+            )
+
+            SettingSwitch(
+                label = appText("Мое оформление поверх партнерского", "My appearance overrides partner branding"),
+                checked = localBrandingOverrideEnabled,
+                onCheckedChange = onLocalBrandingOverride,
+            )
+            Text(
+                text = if (remoteBrandingProviderId.isNotBlank() && !localBrandingOverrideEnabled) {
+                    appText(
+                        "Сейчас применяется брендинг PartnerID: $remoteBrandingProviderId",
+                        "PartnerID branding is active: $remoteBrandingProviderId",
+                    )
+                } else {
+                    appText(
+                        "Если включить переключатель, настройки из админки не будут менять оформление до сброса по умолчанию.",
+                        "When enabled, admin branding will not override this device until settings are reset.",
+                    )
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
             )
 
             SettingsOptionGroup(
@@ -396,43 +500,40 @@ private fun <T> AppearanceOptionGroup(
     circleSwatch: Boolean = true,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, fontWeight = FontWeight.SemiBold)
-        options.forEach { option ->
-            val isSelected = option == selected
-            OutlinedButton(
-                onClick = { onSelect(option) },
-                modifier = Modifier.fillMaxWidth(),
-                colors = if (isSelected) {
-                    ButtonDefaults.outlinedButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                    )
-                } else {
-                    ButtonDefaults.outlinedButtonColors()
-                },
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+        Text(
+            title.uppercase(),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            options.forEach { option ->
+                val isSelected = option == selected
+                Column(
+                    modifier = Modifier.clickable { onSelect(option) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(width = if (circleSwatch) 24.dp else 34.dp, height = 24.dp)
-                            .clip(if (circleSwatch) CircleShape else RoundedCornerShape(8.dp))
+                            .size(width = if (circleSwatch) 38.dp else 58.dp, height = if (circleSwatch) 38.dp else 40.dp)
+                            .clip(if (circleSwatch) CircleShape else RoundedCornerShape(14.dp))
                             .background(swatch(option))
                             .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
-                                shape = if (circleSwatch) CircleShape else RoundedCornerShape(8.dp),
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                shape = if (circleSwatch) CircleShape else RoundedCornerShape(14.dp),
                             ),
                     )
-                    Text(
-                        label(option),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                    if (!circleSwatch) {
+                        Text(
+                            label(option),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -448,24 +549,62 @@ private fun <T> SettingsOptionGroup(
     onSelect: (T) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, fontWeight = FontWeight.SemiBold)
-        options.forEach { option ->
-            val isSelected = option == selected
-            OutlinedButton(
-                onClick = { onSelect(option) },
-                modifier = Modifier.fillMaxWidth(),
-                colors = if (isSelected) {
-                    ButtonDefaults.outlinedButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
+        Text(
+            title.uppercase(),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { option ->
+                val isSelected = option == selected
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.32f) else MaterialTheme.colorScheme.outline,
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        .clickable { onSelect(option) }
+                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label(option),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
-                    ButtonDefaults.outlinedButtonColors()
-                },
-            ) {
-                Text(label(option), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(24.dp)
+    Card(
+        modifier = modifier
+            .shadow(
+                elevation = 18.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Color(0xFF071312).copy(alpha = 0.06f),
+                spotColor = Color(0xFF071312).copy(alpha = 0.08f),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.86f), shape),
+        shape = shape,
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        content()
     }
 }
 
@@ -480,7 +619,7 @@ private fun PortsSection(
     onSavePorts: () -> Unit,
 ) {
     val saveText = appText("Сохранить порты", "Save ports")
-    Card(Modifier.fillMaxWidth()) {
+    SettingsPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             PortField("SOCKS", socksPort, onSocksPort)
             PortField("HTTP", httpPort, onHttpPort)
@@ -503,7 +642,7 @@ private fun VpnSection(
     onUpdateTun: (String, Boolean, Boolean, Boolean) -> Unit,
 ) {
     val saveText = appText("Сохранить VPN", "Save VPN")
-    Card(Modifier.fillMaxWidth()) {
+    SettingsPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             PortField("TUN MTU", mtu, onMtu)
             SettingSwitch("Xray TUN mode", xrayTunModeEnabled) {
@@ -533,7 +672,7 @@ private fun DnsLogsSection(
     onUpdateLogs: (Boolean, Boolean) -> Unit,
 ) {
     val saveText = appText("Сохранить DNS", "Save DNS")
-    Card(Modifier.fillMaxWidth()) {
+    SettingsPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
                 value = dns,
@@ -560,7 +699,7 @@ private fun PingSection(
     selected: PingProtocol,
     onPingProtocol: (PingProtocol) -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    SettingsPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(appText("Протокол проверки", "Check protocol"), color = MaterialTheme.colorScheme.onSurfaceVariant)
             PingProtocolPicker(
@@ -583,7 +722,7 @@ private fun AutoConnectSection(
         AutoConnectMode.FIRST_FROM_TOP_FIVE,
     )
 
-    Card(Modifier.fillMaxWidth()) {
+    SettingsPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(localized(language, "Автоподключение", "Auto connect"), style = MaterialTheme.typography.titleMedium)
             Text(
@@ -665,7 +804,7 @@ private fun RoutingSection(
         }
     }
 
-    Card(Modifier.fillMaxWidth()) {
+    SettingsPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(localized(language, "Исключения из VPN", "VPN exclusions"), style = MaterialTheme.typography.titleMedium)
             Text(
@@ -818,7 +957,7 @@ private fun UrlCommandsSection() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelLarge,
                 )
-                Card(Modifier.fillMaxWidth()) {
+                SettingsPanel(Modifier.fillMaxWidth()) {
                     Column {
                         group.commands.forEachIndexed { index, command ->
                             UrlCommandRow(
@@ -833,7 +972,7 @@ private fun UrlCommandsSection() {
                 }
             }
         }
-        Card(Modifier.fillMaxWidth()) {
+        SettingsPanel(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(localized(language, "Примечание", "Note"), style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -893,7 +1032,7 @@ private fun SubscriptionHeadersSection() {
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Card(Modifier.fillMaxWidth()) {
+        SettingsPanel(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(localized(language, "Функции подписок", "Subscription features"), style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -993,12 +1132,27 @@ private fun SettingsSection.title(language: AppLanguage): String =
 private fun SettingsSection.description(language: AppLanguage): String =
     localized(language, descriptionRu, descriptionEn)
 
+private fun SettingsSection.icon(): ImageVector =
+    when (this) {
+        SettingsSection.Interface -> Icons.Default.Palette
+        SettingsSection.Advanced -> Icons.Default.Tune
+        SettingsSection.Routing -> Icons.Default.Route
+        SettingsSection.Ping -> Icons.Default.Speed
+        SettingsSection.AutoConnect -> Icons.Default.WifiTethering
+        SettingsSection.UrlCommands -> Icons.Default.Link
+        SettingsSection.SubscriptionHeaders -> Icons.Default.Info
+        SettingsSection.Ports -> Icons.Default.Tune
+        SettingsSection.Vpn -> Icons.Default.WifiTethering
+        SettingsSection.DnsLogs -> Icons.Default.Info
+        SettingsSection.Menu -> Icons.Default.Language
+    }
+
 private fun AppTextSize.label(language: AppLanguage): String =
     when (this) {
-        AppTextSize.SMALL -> localized(language, "Маленький", "Small")
-        AppTextSize.NORMAL -> localized(language, "Обычный", "Normal")
-        AppTextSize.LARGE -> localized(language, "Крупный", "Large")
-        AppTextSize.EXTRA_LARGE -> localized(language, "Очень крупный", "Extra large")
+        AppTextSize.SMALL -> localized(language, "S", "S")
+        AppTextSize.NORMAL -> localized(language, "M", "M")
+        AppTextSize.LARGE -> localized(language, "L", "L")
+        AppTextSize.EXTRA_LARGE -> localized(language, "XL", "XL")
     }
 
 private fun AppAccentColor.label(language: AppLanguage): String =
@@ -1013,8 +1167,8 @@ private fun AppAccentColor.label(language: AppLanguage): String =
 private fun AppBackgroundStyle.label(language: AppLanguage): String =
     when (this) {
         AppBackgroundStyle.LIGHT -> localized(language, "Светлый", "Light")
-        AppBackgroundStyle.MIST -> localized(language, "Холодный светлый", "Mist")
-        AppBackgroundStyle.WARM -> localized(language, "Теплый светлый", "Warm")
+        AppBackgroundStyle.MIST -> localized(language, "Холодный", "Mist")
+        AppBackgroundStyle.WARM -> localized(language, "Теплый", "Warm")
         AppBackgroundStyle.DARK -> localized(language, "Темный", "Dark")
     }
 

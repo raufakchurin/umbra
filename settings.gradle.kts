@@ -14,13 +14,13 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VleVpn"
+rootProject.name = "UmbraVpn"
 include(":runtime-contract")
 include(":app")
 
 val enableOlcRtcRuntime = providers.gradleProperty("enableOlcRtcRuntime")
     .orElse(providers.gradleProperty("enableOlcRtc"))
-    .orElse("false")
+    .orElse("true")
     .get()
     .toBoolean()
 

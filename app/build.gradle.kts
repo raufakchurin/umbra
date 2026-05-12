@@ -1,4 +1,5 @@
 import org.gradle.api.provider.Provider
+import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.android.application)
@@ -13,11 +14,11 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
-val appVersionCode = 22
-val appVersionName = "0.1.22"
+val appVersionCode = 26
+val appVersionName = "0.1.26"
 val enableOlcRtcRuntime = providers.gradleProperty("enableOlcRtcRuntime")
     .orElse(providers.gradleProperty("enableOlcRtc"))
-    .orElse("false")
+    .orElse("true")
     .get()
     .toBoolean()
 fun Provider<String>.escapedBuildConfigString(): String = get()
@@ -33,6 +34,9 @@ val providerCheckUrl = configValue("VLE_PARTNER_CHECK_URL")
     .escapedBuildConfigString()
 val telemetryUrl = configValue("VLE_TELEMETRY_URL")
     .orElse("$productionApiBaseUrl/v1/mobile/telemetry")
+    .escapedBuildConfigString()
+val brandingUrl = configValue("VLE_BRANDING_URL")
+    .orElse("$productionApiBaseUrl/v1/mobile/branding")
     .escapedBuildConfigString()
 val telemetryAppKey = configValue("VLE_TELEMETRY_APP_KEY")
     .orElse("")
@@ -75,6 +79,7 @@ val releaseSigningEnabled = listOf(
 android {
     namespace = "ru.myit.vlevpn"
     compileSdk = 35
+    ndkVersion = "28.0.13004108"
 
     signingConfigs {
         if (releaseSigningEnabled) {
@@ -91,14 +96,15 @@ android {
     }
 
     defaultConfig {
-        applicationId = "ru.myit.vlevpn"
+        applicationId = "com.proxy.umbra"
         minSdk = 23
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
-        setProperty("archivesBaseName", "vle-vpn-v$appVersionName")
+        setProperty("archivesBaseName", "umbra-vpn-v$appVersionName")
         buildConfigField("String", "PROVIDER_CHECK_URL", "\"$providerCheckUrl\"")
         buildConfigField("String", "TELEMETRY_URL", "\"$telemetryUrl\"")
+        buildConfigField("String", "BRANDING_URL", "\"$brandingUrl\"")
         buildConfigField("String", "TELEMETRY_APP_KEY", "\"$telemetryAppKey\"")
         buildConfigField("boolean", "TELEMETRY_ENABLED", telemetryEnabled.toString())
         buildConfigField("String", "PUSH_REGISTER_URL", "\"$pushRegisterUrl\"")
@@ -118,6 +124,12 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 
     buildTypes {
@@ -221,8 +233,64 @@ tasks.register("runDebugOnConnectedDevice") {
                 "am",
                 "start",
                 "-n",
-                "ru.myit.vlevpn/.MainActivity",
+                "com.proxy.umbra/ru.myit.vlevpn.MainActivity",
             )
         }.result.get().assertNormalExitValue()
     }
+}
+
+fun registerRuntimePackagingVerification(variantName: String) {
+    val capitalizedVariant = variantName.replaceFirstChar { it.uppercase() }
+    val verifyTask = tasks.register("verify${capitalizedVariant}RuntimePackaging") {
+        group = "verification"
+        description = "Verifies that $variantName APK contains the expected VPN runtime native libraries."
+
+        doLast {
+            val apkDir = layout.buildDirectory.dir("outputs/apk/$variantName").get().asFile
+            val apk = apkDir
+                .listFiles { file -> file.extension == "apk" }
+                ?.singleOrNull()
+                ?: throw GradleException("Expected exactly one $variantName APK in ${apkDir.absolutePath}.")
+
+            val expectedNativeLibs = buildList {
+                add("lib/arm64-v8a/libgojni.so")
+                if (enableOlcRtcRuntime) {
+                    add("lib/arm64-v8a/libolcrtcjni.so")
+                    add("lib/arm64-v8a/libhev-socks5-tunnel.so")
+                    add("lib/arm64-v8a/libvle_olcrtc_tun2socks.so")
+                }
+            }
+
+            ZipFile(apk).use { zip ->
+                val missing = expectedNativeLibs.filter { entry -> zip.getEntry(entry) == null }
+                if (missing.isNotEmpty()) {
+                    throw GradleException(
+                        "Runtime packaging check failed for ${apk.name}. Missing native libs: ${missing.joinToString()}. " +
+                            "Run a clean build and keep enableOlcRtcRuntime=true for production/test APKs.",
+                    )
+                }
+            }
+
+            val buildConfig = layout.buildDirectory
+                .file("generated/source/buildConfig/$variantName/ru/myit/vlevpn/BuildConfig.java")
+                .get()
+                .asFile
+            val expectedBuildConfigValue = "OLCRTC_RUNTIME_INCLUDED = $enableOlcRtcRuntime"
+            if (!buildConfig.readText().contains(expectedBuildConfigValue)) {
+                throw GradleException(
+                    "Runtime packaging check failed for ${apk.name}. BuildConfig does not contain " +
+                        "$expectedBuildConfigValue. Run a clean build.",
+                )
+            }
+        }
+    }
+
+    tasks.named("assemble$capitalizedVariant") {
+        finalizedBy(verifyTask)
+    }
+}
+
+afterEvaluate {
+    registerRuntimePackagingVerification("debug")
+    registerRuntimePackagingVerification("release")
 }

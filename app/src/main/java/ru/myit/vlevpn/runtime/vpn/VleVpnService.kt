@@ -12,10 +12,12 @@ import android.net.VpnService
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.Process
 import androidx.core.app.NotificationCompat
+import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import javax.inject.Provider
+import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,17 +25,25 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import ru.myit.vlevpn.MainActivity
 import ru.myit.vlevpn.R
+import ru.myit.vlevpn.core.logging.LogLevel
+import ru.myit.vlevpn.core.logging.LogRepository
 import ru.myit.vlevpn.runtime.RuntimeRequestStore
 import ru.myit.vlevpn.runtime.RuntimeServiceContract
+import ru.myit.vlevpn.runtime.RuntimeState
 import ru.myit.vlevpn.runtime.VpnServiceRuntime
 
 @AndroidEntryPoint
 class VleVpnService : VpnService() {
-    @Inject lateinit var runtime: VpnServiceRuntime
-    @Inject lateinit var requestStore: RuntimeRequestStore
+    @Inject lateinit var runtimeProvider: Lazy<VpnServiceRuntime>
+    @Inject lateinit var requestStoreProvider: Provider<RuntimeRequestStore>
+    @Inject lateinit var logsProvider: Provider<LogRepository>
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile
+    private var exitAfterDestroy = false
+    @Volatile
+    private var exitScheduled = false
 
     override fun onCreate() {
         super.onCreate()
@@ -43,23 +53,32 @@ class VleVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                serviceScope.launch { runtime.stop(this@VleVpnService) }
+                serviceScope.launch {
+                    runCatching { runtimeProvider.get().stop(this@VleVpnService) }
+                        .onFailure(::handleRuntimeBootstrapFailure)
+                }
             }
             else -> {
-                startAsForeground()
+                runCatching { startAsForeground() }
+                    .onFailure {
+                        handleRuntimeBootstrapFailure(it)
+                        return Service.START_NOT_STICKY
+                    }
                 val requestPath = intent?.getStringExtra(RuntimeServiceContract.EXTRA_REQUEST_PATH)
                 serviceScope.launch {
                     val request = try {
                         val path = requireNotNull(requestPath) { "Missing runtime request" }
+                        val requestStore = requestStoreProvider.get()
                         requestStore.read(path).also { requestStore.clear(path) }
-                    } catch (_: Throwable) {
+                    } catch (error: Throwable) {
                         if (requestPath != null) {
-                            requestStore.clear(requestPath)
+                            runCatching { requestStoreProvider.get().clear(requestPath) }
                         }
-                        runtime.stop(this@VleVpnService)
+                        handleRuntimeBootstrapFailure(error)
                         return@launch
                     }
-                    runtime.start(this@VleVpnService, request)
+                    runCatching { runtimeProvider.get().start(this@VleVpnService, request) }
+                        .onFailure(::handleRuntimeBootstrapFailure)
                 }
             }
         }
@@ -69,24 +88,35 @@ class VleVpnService : VpnService() {
     override fun onDestroy() {
         serviceScope.cancel()
         super.onDestroy()
+        if (exitAfterDestroy) {
+            scheduleRuntimeProcessExit()
+        }
     }
 
-    fun finishRuntimeStop(killRuntimeProcess: Boolean = false) {
+    fun finishRuntimeStop(recycleRuntimeProcess: Boolean = true) {
+        exitAfterDestroy = recycleRuntimeProcess
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
         }
-        if (killRuntimeProcess) {
-            mainHandler.postDelayed(
-                {
-                    Process.killProcess(Process.myPid())
-                },
-                RUNTIME_PROCESS_EXIT_DELAY_MS,
-            )
+        if (recycleRuntimeProcess) {
+            scheduleRuntimeProcessExit()
         }
         stopSelf()
+    }
+
+    private fun handleRuntimeBootstrapFailure(error: Throwable) {
+        val message = error.userSafeMessage()
+        runCatching {
+            logsProvider.get().add(LogLevel.ERROR, "VPN service runtime failed: $message")
+        }
+        runCatching {
+            sendBroadcast(RuntimeServiceContract.logIntent(this, LogLevel.ERROR.name, "VPN service runtime failed: $message"))
+            sendBroadcast(RuntimeServiceContract.stateIntent(this, RuntimeState.Error(message)))
+        }
+        finishRuntimeStop(recycleRuntimeProcess = true)
     }
 
     private fun startAsForeground() {
@@ -137,11 +167,22 @@ class VleVpnService : VpnService() {
         manager.createNotificationChannel(channel)
     }
 
+    private fun scheduleRuntimeProcessExit() {
+        if (exitScheduled) return
+        exitScheduled = true
+        mainHandler.postDelayed({ exitProcess(0) }, RUNTIME_PROCESS_EXIT_DELAY_MS)
+    }
+
     companion object {
         const val ACTION_START = "ru.myit.vlevpn.action.START"
         const val ACTION_STOP = "ru.myit.vlevpn.action.STOP"
         private const val CHANNEL_ID = "vpn_runtime"
         private const val NOTIFICATION_ID = 2601
-        private const val RUNTIME_PROCESS_EXIT_DELAY_MS = 200L
+        private const val RUNTIME_PROCESS_EXIT_DELAY_MS = 1_000L
     }
 }
+
+private fun Throwable.userSafeMessage(): String =
+    message
+        ?.takeIf { it.isNotBlank() }
+        ?: this::class.java.simpleName.ifBlank { "VPN service startup failed" }
