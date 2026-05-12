@@ -1,0 +1,10 @@
+.gradle/
+.kotlin/
+/build/
+/app/build/
+**/build/
+/local.properties
+/.idea/
+.venv/
+/third_party/libXray/
+*.iml
