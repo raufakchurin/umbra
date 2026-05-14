@@ -14,8 +14,8 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
-val appVersionCode = 27
-val appVersionName = "0.1.27"
+val appVersionCode = 29
+val appVersionName = "0.1.29"
 val enableOlcRtcRuntime = providers.gradleProperty("enableOlcRtcRuntime")
     .orElse(providers.gradleProperty("enableOlcRtc"))
     .orElse("true")

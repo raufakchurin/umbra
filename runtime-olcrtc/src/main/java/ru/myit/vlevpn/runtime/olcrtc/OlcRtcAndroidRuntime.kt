@@ -15,9 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import ru.myit.vlevpn.olcrtcbind.mobile.LogWriter
 import ru.myit.vlevpn.olcrtcbind.mobile.Mobile
-import ru.myit.vlevpn.olcrtcbind.mobile.SocketProtector
 import ru.myit.vlevpn.runtime.contract.OlcRtcPingRequest
 import ru.myit.vlevpn.runtime.contract.OlcRtcRuntimeCallbacks
 import ru.myit.vlevpn.runtime.contract.OlcRtcRuntimeEngine
@@ -61,7 +59,7 @@ class OlcRtcAndroidRuntime @Inject constructor() : OlcRtcRuntimeEngine {
                     "",
                     "",
                 )
-                Mobile.waitReady(MOBILE_READY_TIMEOUT_MS)
+                waitForLocalSocksReady(localSocksPort)
                 callbacks.log("olcRTC SOCKS ready on 127.0.0.1:$localSocksPort")
 
                 val descriptor = establishVpn(service, request, callbacks)
@@ -118,24 +116,12 @@ class OlcRtcAndroidRuntime @Inject constructor() : OlcRtcRuntimeEngine {
     ) {
         loadMobileLibrary()
         Mobile.setProviders()
-        Mobile.setProtector(
-            object : SocketProtector {
-                override fun protect(fd: Long): Boolean = callbacks.protect(fd.toInt())
-            },
-        )
-        Mobile.setLogWriter(
-            object : LogWriter {
-                override fun writeLog(msg: String) {
-                    callbacks.log(msg)
-                }
-            },
-        )
         Mobile.setDebug(request.debugLogging)
         Mobile.setLink("direct")
         Mobile.setTransport(request.transportName)
         Mobile.setDNS(request.dnsServers.firstOrNull().asDnsEndpoint())
         Mobile.setVP8Options(DEFAULT_VP8_FPS.toLong(), DEFAULT_VP8_BATCH.toLong())
-        callbacks.log("olcRTC protect/log bridges are installed for Android VPN mode")
+        callbacks.log("olcRTC mobile runtime configured for Android VPN mode")
     }
 
     private fun establishVpn(
@@ -237,6 +223,15 @@ class OlcRtcAndroidRuntime @Inject constructor() : OlcRtcRuntimeEngine {
             if (!isLocalSocksPortOpen(port)) return
             delay(SOCKS_RELEASE_POLL_MS)
         }
+    }
+
+    private suspend fun waitForLocalSocksReady(port: Int) {
+        val deadline = System.currentTimeMillis() + MOBILE_READY_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (isLocalSocksPortOpen(port)) return
+            delay(SOCKS_RELEASE_POLL_MS)
+        }
+        error("olcRTC SOCKS did not become ready in time")
     }
 
     private fun chooseAvailableSocksPort(): Int? {
