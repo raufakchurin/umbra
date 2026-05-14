@@ -6,7 +6,6 @@ import android.os.ParcelFileDescriptor
 import java.io.File
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.net.Socket
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,7 +15,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ru.myit.vlevpn.olcrtcbind.mobile.LogWriter
 import ru.myit.vlevpn.olcrtcbind.mobile.Mobile
+import ru.myit.vlevpn.olcrtcbind.mobile.SocketProtector
 import ru.myit.vlevpn.runtime.contract.OlcRtcPingRequest
 import ru.myit.vlevpn.runtime.contract.OlcRtcRuntimeCallbacks
 import ru.myit.vlevpn.runtime.contract.OlcRtcRuntimeEngine
@@ -117,12 +118,24 @@ class OlcRtcAndroidRuntime @Inject constructor() : OlcRtcRuntimeEngine {
     ) {
         loadMobileLibrary()
         Mobile.setProviders()
-        callbacks.log("olcRTC protects control traffic by excluding the app package from the VPN")
+        Mobile.setProtector(
+            object : SocketProtector {
+                override fun protect(fd: Long): Boolean = callbacks.protect(fd.toInt())
+            },
+        )
+        Mobile.setLogWriter(
+            object : LogWriter {
+                override fun writeLog(msg: String) {
+                    callbacks.log(msg)
+                }
+            },
+        )
         Mobile.setDebug(request.debugLogging)
         Mobile.setLink("direct")
         Mobile.setTransport(request.transportName)
         Mobile.setDNS(request.dnsServers.firstOrNull().asDnsEndpoint())
         Mobile.setVP8Options(DEFAULT_VP8_FPS.toLong(), DEFAULT_VP8_BATCH.toLong())
+        callbacks.log("olcRTC protect/log bridges are installed for Android VPN mode")
     }
 
     private fun establishVpn(
@@ -189,38 +202,7 @@ class OlcRtcAndroidRuntime @Inject constructor() : OlcRtcRuntimeEngine {
 
     private fun writeTun2SocksConfig(service: VpnService, request: OlcRtcRuntimeRequest): File {
         val file = File(service.filesDir, TUN2SOCKS_CONFIG_FILE_NAME)
-        file.writeText(
-            """
-            tunnel:
-              name: tun0
-              mtu: ${request.tunMtu}
-              multi-queue: false
-              ipv4: $TUN_IPV4_ADDRESS
-
-            socks5:
-              address: 127.0.0.1
-              port: $localSocksPort
-              udp: 'tcp'
-              pipeline: false
-
-            mapdns:
-              address: ${request.dnsServers.firstOrNull().asDnsAddress()}
-              port: 53
-              network: $MAPDNS_NETWORK
-              netmask: $MAPDNS_NETMASK
-              cache-size: 10000
-
-            misc:
-              task-stack-size: 24576
-              tcp-buffer-size: 4096
-              max-session-count: 1200
-              connect-timeout: 10000
-              tcp-read-write-timeout: 300000
-              udp-read-write-timeout: 60000
-              log-file: stderr
-              log-level: warn
-            """.trimIndent(),
-        )
+        file.writeText(buildTun2SocksConfig(request, localSocksPort))
         return file
     }
 
@@ -277,26 +259,58 @@ class OlcRtcAndroidRuntime @Inject constructor() : OlcRtcRuntimeEngine {
             }
         }.isSuccess
 
-    private companion object {
-        const val TUN2SOCKS_CONFIG_FILE_NAME = "olcrtc-tun2socks.yaml"
-        const val LOCAL_SOCKS_PORT_BASE = 10818
-        const val LOCAL_SOCKS_PORT_MAX = 10858
-        const val MOBILE_READY_TIMEOUT_MS = 25_000L
-        const val TUN2SOCKS_HANDOFF_DELAY_MS = 300L
-        const val SOCKS_RELEASE_TIMEOUT_MS = 2_500L
-        const val SOCKS_RELEASE_POLL_MS = 100L
-        const val SOCKET_CONNECT_TIMEOUT_MS = 150
-        const val TUN_IPV4_ADDRESS = "10.0.88.88"
-        const val IPV4_PREFIX_LENGTH = 24
-        const val MAPDNS_NETWORK = "100.64.0.0"
-        const val MAPDNS_NETMASK = "255.192.0.0"
-        const val DEFAULT_DNS_ADDRESS = "1.1.1.1"
-        const val DEFAULT_VP8_FPS = 120
-        const val DEFAULT_VP8_BATCH = 64
-        const val TX_BYTES_INDEX = 1
-        const val RX_BYTES_INDEX = 3
-    }
 }
+
+private const val TUN2SOCKS_CONFIG_FILE_NAME = "olcrtc-tun2socks.yaml"
+private const val LOCAL_SOCKS_PORT_BASE = 10818
+private const val LOCAL_SOCKS_PORT_MAX = 10858
+private const val MOBILE_READY_TIMEOUT_MS = 25_000L
+private const val TUN2SOCKS_HANDOFF_DELAY_MS = 300L
+private const val SOCKS_RELEASE_TIMEOUT_MS = 2_500L
+private const val SOCKS_RELEASE_POLL_MS = 100L
+private const val SOCKET_CONNECT_TIMEOUT_MS = 150
+private const val TUN_IPV4_ADDRESS = "10.0.88.88"
+private const val IPV4_PREFIX_LENGTH = 24
+private const val MAPDNS_NETWORK = "100.64.0.0"
+private const val MAPDNS_NETMASK = "255.192.0.0"
+private const val DEFAULT_VP8_FPS = 120
+private const val DEFAULT_VP8_BATCH = 64
+private const val TX_BYTES_INDEX = 1
+private const val RX_BYTES_INDEX = 3
+
+internal fun buildTun2SocksConfig(
+    request: OlcRtcRuntimeRequest,
+    localSocksPort: Int,
+): String = """
+    tunnel:
+      name: tun0
+      mtu: ${request.tunMtu}
+      multi-queue: false
+      ipv4: $TUN_IPV4_ADDRESS
+
+    socks5:
+      address: 127.0.0.1
+      port: $localSocksPort
+      udp: 'udp'
+      pipeline: false
+
+    mapdns:
+      address: ${request.dnsServers.firstOrNull().asDnsAddress()}
+      port: 53
+      network: $MAPDNS_NETWORK
+      netmask: $MAPDNS_NETMASK
+      cache-size: 10000
+
+    misc:
+      task-stack-size: 24576
+      tcp-buffer-size: 4096
+      max-session-count: 1200
+      connect-timeout: 10000
+      tcp-read-write-timeout: 300000
+      udp-read-write-timeout: 60000
+      log-file: stderr
+      log-level: warn
+""".trimIndent()
 
 private fun String?.asDnsAddress(): String =
     this?.substringBefore(":")?.takeIf { value ->

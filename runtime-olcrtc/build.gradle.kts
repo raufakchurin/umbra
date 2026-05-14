@@ -47,4 +47,5 @@ dependencies {
     compileOnly(files("libs/olcrtc.aar"))
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    testImplementation(libs.junit)
 }
