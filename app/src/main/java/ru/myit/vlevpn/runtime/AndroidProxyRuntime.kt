@@ -1,5 +1,6 @@
 package ru.myit.vlevpn.runtime
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -49,10 +50,12 @@ class AndroidProxyRuntime @Inject constructor(
             filter,
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
+        restoreStateFromRunningVpnServiceIfNeeded()
     }
 
     override suspend fun start(request: StartProxyRequest) {
         val accepted = mutex.withLock {
+            restoreStateFromRunningVpnServiceIfNeeded()
             if (!state.value.canAcceptStartRequest()) {
                 logs.add(LogLevel.WARN, "Runtime start ignored because another transition is active")
                 return@withLock false
@@ -81,6 +84,7 @@ class AndroidProxyRuntime @Inject constructor(
 
     override suspend fun stop() {
         mutex.withLock {
+            restoreStateFromRunningVpnServiceIfNeeded()
             when (state.value) {
                 RuntimeState.Idle -> {
                     _stats.value = RuntimeStats()
@@ -130,6 +134,18 @@ class AndroidProxyRuntime @Inject constructor(
 
     fun markPreparingVpnPermission() {
         stateStore.update(RuntimeState.PreparingVpnPermission)
+    }
+
+    private fun restoreStateFromRunningVpnServiceIfNeeded() {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val restoredState = restoreRuntimeStateAfterProcessRestart(
+            currentState = state.value,
+            vpnServiceRunning = isVpnServiceRunning(activityManager, VleVpnService::class.java.name),
+            connectedAtMillis = System.currentTimeMillis(),
+        )
+        if (restoredState == state.value) return
+        stateStore.update(restoredState)
+        logs.add(LogLevel.INFO, "Restored runtime state from active VPN service process")
     }
 
     private suspend fun delayUntilRuntimeProcessCanRestart() {
@@ -193,6 +209,39 @@ class AndroidProxyRuntime @Inject constructor(
     private companion object {
         const val RUNTIME_PROCESS_RESTART_GUARD_MS = 3_000L
         const val FOREGROUND_START_TIMEOUT_MS = 5_000L
+    }
+}
+
+@Suppress("DEPRECATION")
+internal fun isVpnServiceRunning(
+    activityManager: ActivityManager?,
+    serviceClassName: String,
+): Boolean =
+    activityManager
+        ?.getRunningServices(Int.MAX_VALUE)
+        ?.any { serviceInfo ->
+            serviceInfo.service.className == serviceClassName && serviceInfo.foreground
+        } == true
+
+internal fun restoreRuntimeStateAfterProcessRestart(
+    currentState: RuntimeState,
+    vpnServiceRunning: Boolean,
+    connectedAtMillis: Long,
+): RuntimeState {
+    if (!vpnServiceRunning) return currentState
+    return when (currentState) {
+        RuntimeState.Idle,
+        is RuntimeState.Error,
+        -> RuntimeState.Running(connectedAtMillis)
+        RuntimeState.PreparingVpnPermission,
+        RuntimeState.StartingForeground,
+        RuntimeState.BuildingConfig,
+        RuntimeState.EstablishingVpn,
+        RuntimeState.StartingNativeCore,
+        RuntimeState.VerifyingConnection,
+        is RuntimeState.Running,
+        RuntimeState.Stopping,
+        -> currentState
     }
 }
 
